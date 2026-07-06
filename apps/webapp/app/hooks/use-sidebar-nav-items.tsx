@@ -126,6 +126,12 @@ export function useSidebarNavItems() {
     },
     {
       type: "child",
+      title: "Rooms",
+      to: "/rooms",
+      Icon: MapPinIcon,
+    },
+    {
+      type: "child",
       title: "Categories",
       to: "/categories",
       Icon: BoxesIcon,
