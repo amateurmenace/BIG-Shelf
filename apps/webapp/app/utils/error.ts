@@ -87,6 +87,7 @@ export type FailureReason = {
     | "Scanner"
     | "SSO"
     | "Kit"
+    | "Room"
     | "Note"
     | "Team Member Note"
     | "Audit Image"
