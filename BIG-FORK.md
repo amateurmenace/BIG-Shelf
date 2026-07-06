@@ -104,18 +104,26 @@ That's the maintenance cost of core edits — another reason to prefer additive.
 ## Deployment
 
 - **Manual (current):** `fly deploy` from the **repo root** uses the root
-  [`fly.toml`](./fly.toml) (app `big-shelf`, region `ewr`). Note this deploys
-  your **working tree**, including uncommitted changes — so commit first to
-  keep git and production in sync.
-- **CI (optional):** [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
-  auto-deploys on push to `main`. It is inherited from upstream and needs
-  secrets configured in **our** repo (`FLY_API_TOKEN`, `SESSION_SECRET`,
-  `SUPABASE_*`, `DATABASE_URL`) before it will work. Until then it will show
-  failing runs — either add the secrets or disable Actions in repo settings.
+  [`fly.toml`](./fly.toml) (app `big-shelf`, region `ewr`). This deploys your
+  **working tree**, including uncommitted changes — so commit first to keep git
+  and production in sync.
+  - ⚠️ The root `fly.toml` has **no `release_command`**, so a manual deploy
+    does **not** run DB migrations. After pulling upstream changes that add a
+    migration, run `pnpm db:deploy-migration` yourself — or add
+    `release_command = "npx prisma migrate deploy"` to the root `fly.toml`.
+- **CI (currently disabled):** GitHub Actions is **turned off** on this fork
+  (as of 2026-07-06) so pushes don't spawn failing runs or risk an accidental
+  deploy. [`deploy.yml`](.github/workflows/deploy.yml) would auto-deploy on push
+  to `main`, but needs secrets in **our** repo (`FLY_API_TOKEN`,
+  `SESSION_SECRET`, `SUPABASE_*`, `DATABASE_URL`). To enable CI later: add those
+  secrets, then re-enable Actions (Settings → Actions → General).
 
-> ⚠️ **Two `fly.toml` files exist.** The root one (manual `fly deploy`) and
-> `apps/webapp/fly.toml` (what CI reads for the app name). Reconcile these
-> before relying on CI deploys, or CI may target the wrong app.
+> ⚠️ **Two `fly.toml` files exist — don't confuse them.** The root one is
+> **BIG's** (manual deploy, `big-shelf` / `ewr`). `apps/webapp/fly.toml` is
+> **upstream's** (`shelf-webapp` / `ams`, with a migration `release_command`)
+> and is what `deploy.yml` reads — leave it untouched to avoid merge conflicts.
+> If you enable CI later, point the workflow at the root `fly.toml` instead of
+> editing upstream's file.
 
 ---
 
