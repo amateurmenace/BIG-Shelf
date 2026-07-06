@@ -5,6 +5,7 @@ import type {
   Organization,
   Asset,
   Kit,
+  Room,
   User,
   UserOrganization,
   Tag,
@@ -63,6 +64,7 @@ import {
 } from "~/utils/markdoc-wrappers";
 import {
   assertAssetsBelongToOrg,
+  assertRoomsBelongToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
   assertUserBelongsToOrg,
@@ -3261,6 +3263,366 @@ export async function createKitBookingNote({
       bookingId,
       organizationId,
       content: `${kitContent} ${action} to the booking.`,
+    });
+  }
+}
+
+/**
+ * Adds one or more rooms to a booking and pulls in their assigned equipment.
+ *
+ * Rooms are first-class reservable resources. Reserving a room does two things,
+ * kit-style:
+ *  1. Connects the room(s) to the booking's `rooms` relation (idempotently —
+ *     rooms already linked to this booking are skipped so we never re-connect).
+ *  2. Pulls in the room's currently-assigned equipment: every {@link Asset}
+ *     whose `roomId` is one of `roomIds` is added to the booking so the room
+ *     and its gear are reserved together. A room with no assigned equipment is
+ *     still reservable — the pull-in step is simply a no-op in that case.
+ *
+ * The equipment pull-in DELEGATES to {@link updateBookingAssets} rather than
+ * duplicating its internals: that function already validates the assets against
+ * the org, performs the idempotent `ON CONFLICT DO NOTHING` join insert, flips
+ * asset (and kit) status to CHECKED_OUT when the booking is ONGOING/OVERDUE,
+ * and records the per-asset `BOOKING_ASSETS_ADDED` activity events. We forward
+ * the affected assets' `kitId`s as the `kitIds` param so its kit-status sync
+ * and note-suppression behave correctly.
+ *
+ * SECURITY (cross-org IDOR): `roomIds` originate from request/form input, so we
+ * assert they belong to `organizationId` before connecting them (see
+ * .claude/rules/org-scope-user-supplied-ids.md). The room's assets are loaded
+ * with an `organizationId`-scoped query, so foreign-org assets can never be
+ * pulled in even if a room's data were somehow inconsistent.
+ *
+ * @param params.id - The booking to add rooms to
+ * @param params.organizationId - Caller's validated organization (required; scopes every read/write)
+ * @param params.roomIds - Room IDs to reserve, sourced from request/form input
+ * @param params.userId - Optional acting user, for note attribution
+ * @returns The updated booking (`id`, `name`, `status`)
+ * @throws {ShelfError} If the booking is missing, a room is out-of-org, or the update fails
+ */
+export async function updateBookingRooms({
+  id,
+  organizationId,
+  roomIds,
+  userId,
+}: Pick<Booking, "id" | "organizationId"> & {
+  roomIds: Room["id"][];
+  userId?: User["id"];
+}) {
+  try {
+    // Dedupe so duplicate IDs don't inflate validation counts or the note.
+    const uniqueRoomIds = [...new Set(roomIds)];
+
+    if (uniqueRoomIds.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No rooms were selected to add to the booking.",
+        label,
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
+
+    // Connect the rooms and collect their assigned assets atomically. The
+    // equipment is added afterwards by delegating to updateBookingAssets.
+    const { booking, roomAssetIds, roomAssetKitIds, addedRooms } =
+      await db.$transaction(async (tx) => {
+        // Verify booking exists (and is in this org) before touching the join
+        // table, so a stale/deleted booking returns a clean 404 (P2025)
+        // instead of a FK violation (P2003). Mirrors updateBookingAssets.
+        const b = await tx.booking.findUniqueOrThrow({
+          where: { id, organizationId },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            // Rooms already linked — used to skip re-connecting and to build a
+            // note that lists only the rooms that were actually newly added.
+            rooms: { select: { id: true } },
+          },
+        });
+
+        // SECURITY (cross-org IDOR): prove every room belongs to this org
+        // before connecting. Runs inside the tx so validation commits
+        // atomically with the mutation.
+        await assertRoomsBelongToOrg(
+          { roomIds: uniqueRoomIds, organizationId },
+          tx
+        );
+
+        // Idempotent connect: only the rooms not already on the booking.
+        const alreadyLinked = new Set(b.rooms.map((r) => r.id));
+        const roomIdsToConnect = uniqueRoomIds.filter(
+          (roomId) => !alreadyLinked.has(roomId)
+        );
+
+        if (roomIdsToConnect.length > 0) {
+          await tx.booking.update({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+            where: { id: b.id },
+            data: {
+              rooms: {
+                connect: roomIdsToConnect.map((roomId) => ({ id: roomId })),
+              },
+            },
+            select: { id: true },
+          });
+        }
+
+        // PULL IN EQUIPMENT: load the assigned assets of the requested rooms,
+        // org-scoped. We include kitId so we can forward kit IDs to
+        // updateBookingAssets for its kit-status sync. Empty rooms simply
+        // yield no assets — the room is still reserved.
+        const roomAssets = await tx.asset.findMany({
+          where: { roomId: { in: uniqueRoomIds }, organizationId },
+          select: { id: true, kitId: true },
+        });
+
+        return {
+          booking: b,
+          roomAssetIds: roomAssets.map((a) => a.id),
+          roomAssetKitIds: getKitIdsByAssets(roomAssets),
+          // Rooms actually newly linked by this call (for the activity note).
+          addedRooms: uniqueRoomIds.filter(
+            (roomId) => !alreadyLinked.has(roomId)
+          ),
+        };
+      });
+
+    // PULL IN EQUIPMENT (delegate): add the rooms' assets to the booking.
+    // updateBookingAssets is idempotent and already handles the
+    // ONGOING/OVERDUE -> CHECKED_OUT status logic, kit-status sync, and the
+    // per-asset BOOKING_ASSETS_ADDED events, so we don't duplicate any of it.
+    if (roomAssetIds.length > 0) {
+      await updateBookingAssets({
+        id: booking.id,
+        organizationId,
+        assetIds: roomAssetIds,
+        kitIds: roomAssetKitIds.length > 0 ? roomAssetKitIds : undefined,
+        userId,
+      });
+    }
+
+    // BOOKING ACTIVITY LOG: record which rooms were added. Best-effort — the
+    // booking mutation already committed, so we log failures instead of
+    // throwing (mirrors updateBookingAssets' note handling).
+    if (addedRooms.length > 0) {
+      try {
+        const rooms = await db.room.findMany({
+          where: { id: { in: addedRooms }, organizationId },
+          select: { id: true, name: true },
+        });
+
+        // Rooms have no dedicated markdoc note component (unlike kits), so we
+        // build human-readable content with the generic link wrapper. Single
+        // room -> a link to the room; multiple rooms -> comma-joined links.
+        const roomContent = rooms
+          .map((room) => wrapLinkForNote(`/rooms/${room.id}`, room.name))
+          .join(", ");
+
+        if (userId) {
+          const user = await getUserByID(userId, {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+            } satisfies Prisma.UserSelect,
+          });
+          await createSystemBookingNote({
+            bookingId: booking.id,
+            organizationId,
+            content: `${wrapUserLinkForNote(
+              user
+            )} added ${roomContent} to the booking.`,
+          });
+        } else {
+          await createSystemBookingNote({
+            bookingId: booking.id,
+            organizationId,
+            content: `${roomContent} added to the booking.`,
+          });
+        }
+      } catch (noteError) {
+        Logger.error(
+          new ShelfError({
+            cause: noteError,
+            message: "Failed to create booking note after adding rooms",
+            label,
+            shouldBeCaptured: false,
+          })
+        );
+      }
+    }
+
+    return booking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while adding rooms to the booking.",
+    });
+  }
+}
+
+/**
+ * Removes one or more rooms from a booking and their assigned equipment.
+ *
+ * The inverse of {@link updateBookingRooms}. Removing a room:
+ *  1. Disconnects the room(s) from the booking's `rooms` relation.
+ *  2. Removes the room's currently-assigned equipment (assets whose `roomId`
+ *     is one of `roomIds`) from the booking, so the room and its gear leave
+ *     the booking together.
+ *
+ * The equipment removal DELEGATES to {@link removeAssets}, which already resets
+ * each asset's status back to AVAILABLE when the booking is ONGOING/OVERDUE,
+ * cleans up kit status, writes the removal notes, and records the per-asset
+ * `BOOKING_ASSETS_REMOVED` events — so we don't duplicate any of that.
+ *
+ * SECURITY (cross-org IDOR): `roomIds` originate from request/form input, so we
+ * assert they belong to `organizationId` before use, and the disconnect /
+ * asset lookup are org-scoped.
+ *
+ * @param params.id - The booking to remove rooms from
+ * @param params.organizationId - Caller's validated organization (required; scopes every read/write)
+ * @param params.roomIds - Room IDs to remove, sourced from request/form input
+ * @param params.userId - Acting user, for note attribution
+ * @returns The updated booking (`id`, `name`, `status`)
+ * @throws {ShelfError} If the booking is missing, a room is out-of-org, or the update fails
+ */
+export async function removeBookingRooms({
+  id,
+  organizationId,
+  roomIds,
+  userId,
+}: Pick<Booking, "id" | "organizationId"> & {
+  roomIds: Room["id"][];
+  userId: User["id"];
+}) {
+  try {
+    // Dedupe so duplicate IDs don't cause false validation failures.
+    const uniqueRoomIds = [...new Set(roomIds)];
+
+    if (uniqueRoomIds.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "No rooms were selected to remove from the booking.",
+        label,
+        shouldBeCaptured: false,
+        status: 400,
+      });
+    }
+
+    // Disconnect the rooms and gather their assigned assets atomically. The
+    // asset removal itself is delegated to removeAssets after the tx.
+    const { booking, roomAssets } = await db.$transaction(async (tx) => {
+      // Verify booking exists (and is in this org) before mutating.
+      const b = await tx.booking.findUniqueOrThrow({
+        where: { id, organizationId },
+        select: { id: true, name: true, status: true },
+      });
+
+      // SECURITY (cross-org IDOR): prove every room belongs to this org before
+      // disconnecting / reading its assets. Inside the tx for atomicity.
+      await assertRoomsBelongToOrg(
+        { roomIds: uniqueRoomIds, organizationId },
+        tx
+      );
+
+      // Load the rooms' assigned assets (org-scoped) BEFORE disconnecting the
+      // rooms — needed to hand the asset IDs to removeAssets.
+      const assets = await tx.asset.findMany({
+        where: { roomId: { in: uniqueRoomIds }, organizationId },
+        select: { id: true, kitId: true },
+      });
+
+      await tx.booking.update({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: booking id already org-checked via findUniqueOrThrow({where:{id,organizationId}}) above; this is the write on that same proven id
+        where: { id: b.id },
+        data: {
+          rooms: {
+            disconnect: uniqueRoomIds.map((roomId) => ({ id: roomId })),
+          },
+        },
+        select: { id: true },
+      });
+
+      return { booking: b, roomAssets: assets };
+    });
+
+    // Remove the rooms' assets from the booking by delegating to removeAssets,
+    // which resets asset (and kit) status and records the removal events/notes.
+    if (roomAssets.length > 0) {
+      const user = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      await removeAssets({
+        booking: { id: booking.id, assetIds: roomAssets.map((a) => a.id) },
+        firstName: user?.firstName ?? "",
+        lastName: user?.lastName ?? "",
+        userId,
+        kitIds: getKitIdsByAssets(roomAssets),
+        organizationId,
+      });
+    }
+
+    // BOOKING ACTIVITY LOG: record which rooms were removed. Best-effort —
+    // the disconnect already committed, so we log failures instead of throwing.
+    try {
+      const rooms = await db.room.findMany({
+        where: { id: { in: uniqueRoomIds }, organizationId },
+        select: { id: true, name: true },
+      });
+
+      // Mirror the kit removal note path: attribute to the user, list rooms as
+      // generic links (rooms have no dedicated markdoc note component).
+      const roomContent = rooms
+        .map((room) => wrapLinkForNote(`/rooms/${room.id}`, room.name))
+        .join(", ");
+
+      const user = await getUserByID(userId, {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+        } satisfies Prisma.UserSelect,
+      });
+
+      await createSystemBookingNote({
+        bookingId: booking.id,
+        organizationId,
+        content: `${wrapUserLinkForNote(
+          user
+        )} removed ${roomContent} from booking.`,
+      });
+    } catch (noteError) {
+      Logger.error(
+        new ShelfError({
+          cause: noteError,
+          message: "Failed to create booking note after removing rooms",
+          label,
+          shouldBeCaptured: false,
+        })
+      );
+    }
+
+    return booking;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      label,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while removing rooms from the booking.",
     });
   }
 }

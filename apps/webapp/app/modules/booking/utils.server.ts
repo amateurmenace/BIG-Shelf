@@ -504,3 +504,87 @@ export function createBookingConflictConditions({
     select: { id: true, status: true, name: true },
   };
 }
+
+/**
+ * Creates standardized booking conflict query conditions for a `Room.bookings`
+ * include.
+ *
+ * Rooms are first-class reservable resources, so — exactly like assets — a room
+ * can only be in one active reservation for an overlapping time window. This is
+ * the room-side mirror of {@link createBookingConflictConditions}: pass the
+ * result as the `bookings` include on a `Room` query to surface the bookings
+ * that would clash with the requested `[fromDate, toDate]` window, letting the
+ * caller flag the room as already-reserved.
+ *
+ * Overlap rules match the asset logic exactly:
+ * - Rule 1: RESERVED bookings always conflict when their window overlaps.
+ * - Rule 2: ONGOING/OVERDUE bookings conflict when their window overlaps.
+ *
+ * When `fromDate`/`toDate` are absent no window can be computed, so an empty
+ * `where` is returned (no rows filtered out) — same as the asset helper.
+ *
+ * @param params.currentBookingId - The booking being edited; excluded from
+ *   conflict results unless `includeCurrentBooking` is true
+ * @param params.fromDate - Requested reservation start (inclusive)
+ * @param params.toDate - Requested reservation end (inclusive)
+ * @param params.includeCurrentBooking - When true, the current booking is NOT
+ *   excluded (used by callers that want to detect the room's own overlap)
+ * @returns A `Prisma.Room$bookingsArgs` suitable for a `Room.bookings` include
+ */
+export function createRoomBookingConflictConditions({
+  currentBookingId,
+  fromDate,
+  toDate,
+  includeCurrentBooking = false,
+}: {
+  currentBookingId: string;
+  fromDate?: Date | string | null;
+  toDate?: Date | string | null;
+  includeCurrentBooking?: boolean;
+}): Prisma.Room$bookingsArgs {
+  return {
+    where: {
+      ...(fromDate && toDate
+        ? {
+            OR: [
+              // Rule 1: RESERVED bookings always conflict
+              {
+                status: BookingStatus.RESERVED,
+                ...(includeCurrentBooking
+                  ? {}
+                  : { id: { not: currentBookingId } }),
+                OR: [
+                  {
+                    from: { lte: toDate },
+                    to: { gte: fromDate },
+                  },
+                  {
+                    from: { gte: fromDate },
+                    to: { lte: toDate },
+                  },
+                ],
+              },
+              // Rule 2: ONGOING/OVERDUE bookings conflict when their window overlaps
+              {
+                status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+                ...(includeCurrentBooking
+                  ? {}
+                  : { id: { not: currentBookingId } }),
+                OR: [
+                  {
+                    from: { lte: toDate },
+                    to: { gte: fromDate },
+                  },
+                  {
+                    from: { gte: fromDate },
+                    to: { lte: toDate },
+                  },
+                ],
+              },
+            ],
+          }
+        : {}),
+    },
+    select: { id: true, status: true, name: true },
+  };
+}

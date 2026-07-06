@@ -160,6 +160,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               profilePicture: true,
             },
           },
+          // Reserved rooms surfaced on the booking overview (Rooms strip +
+          // manage-rooms entry point). Tight select — only what RoomBadge needs.
+          rooms: { select: { id: true, name: true, color: true } },
           // Only include notification recipients for admin/owner users.
           // Self-service/base users don't need this data (they can't see or
           // manage notification settings).

@@ -25,6 +25,7 @@ import type {
   Category,
   Kit,
   Location,
+  Room,
   Tag,
   TeamMember,
   User,
@@ -76,6 +77,12 @@ export type OrgValidationTxClient = {
     }) => Promise<{ id: string }[]>;
   };
   kit: {
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
+  };
+  room: {
     findMany: (args: {
       where: { id: { in: string[] }; organizationId: string };
       select: { id: true };
@@ -213,6 +220,52 @@ export async function assertKitsBelongToOrg(
       title: "Invalid kits",
       message:
         "Some of the selected kits do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Asserts that every room ID belongs to `organizationId`.
+ *
+ * Rooms are first-class reservable resources (like assets and kits). When a
+ * room ID arrives from request/form input and is connected to a booking's
+ * `rooms` relation, we must prove it belongs to the caller's organization —
+ * otherwise an attacker in Org A could reserve Org B's room (cross-org IDOR).
+ * Dedupes the input so duplicate IDs don't inflate the expected count. A no-op
+ * for an empty list.
+ *
+ * @param params.roomIds - Room IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ */
+export async function assertRoomsBelongToOrg(
+  {
+    roomIds,
+    organizationId,
+  }: { roomIds: Room["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (roomIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(roomIds)];
+
+  const found = await client.room.findMany({
+    where: { id: { in: uniqueIds }, organizationId },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid rooms",
+      message:
+        "Some of the selected rooms do not exist in your workspace. Please reload and try again.",
       label,
       status: 400,
       shouldBeCaptured: false,

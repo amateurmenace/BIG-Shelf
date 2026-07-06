@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
+import { RoomBadge } from "~/components/rooms/room-badge";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -181,6 +182,18 @@ export function BookingAssetsColumn() {
           <div className="mb-2">
             <BookingAssetsFilters />
           </div>
+
+          {/* Reserved rooms strip: shows the rooms currently reserved on this
+              booking as compact colored badges. Only rendered when the booking
+              has at least one reserved room. */}
+          {booking.rooms && booking.rooms.length > 0 ? (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-gray-700">Rooms</span>
+              {booking.rooms.map((room) => (
+                <RoomBadge key={room.id} room={room} />
+              ))}
+            </div>
+          ) : null}
 
           {/* This is a fake table header */}
           <div className="-mx-4 border border-b-0 bg-white px-4 pb-3 pt-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t ">
@@ -382,6 +395,17 @@ function BookingAssetsHeader({
             >
               Scan to add
             </Button>
+            {/* Entry point to manage the booking's reserved rooms. Gated by the
+                same condition as "Add assets" (manage-rooms route owned by
+                another agent). Link button — no `type` needed. */}
+            <Button
+              to="manage-rooms"
+              variant="secondary"
+              className="whitespace-nowrap"
+              disabled={manageAssetsButtonDisabled}
+            >
+              Add rooms
+            </Button>
             <Button
               to={manageAssetsUrl}
               className="whitespace-nowrap"
@@ -422,6 +446,16 @@ function BookingAssetsHeader({
             className="flex-1"
           >
             Scan
+          </Button>
+          {/* Entry point to manage the booking's reserved rooms. Gated by the
+              same condition as "Add assets". Link button — no `type` needed. */}
+          <Button
+            to="manage-rooms"
+            variant="secondary"
+            className="flex-1 whitespace-nowrap"
+            disabled={manageAssetsButtonDisabled}
+          >
+            Add rooms
           </Button>
           <Button
             to={manageAssetsUrl}
