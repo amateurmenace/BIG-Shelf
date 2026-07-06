@@ -1,0 +1,26 @@
+# Fly.io configuration for the BIG Equipment Library (self-hosted shelf.nu).
+# Build context is the monorepo root; the Dockerfile uses `turbo prune` to
+# produce a minimal @shelf/webapp image. App listens on PORT=8080 (set in the
+# Dockerfile). See https://fly.io/docs/reference/configuration/.
+app = "big-shelf"
+primary_region = "ewr" # Newark, NJ — closest available region to Brookline (Fly deprecated bos)
+
+[build]
+  dockerfile = "apps/webapp/Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Scale to zero when idle to keep test costs near $0; cold start is a few
+  # seconds on the first request. Set min_machines_running = 1 for production
+  # so background workers/scheduler stay running.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
