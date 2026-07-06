@@ -83,6 +83,7 @@ model User {
   bookings            Booking[]          @relation("creator")
   custodies           Booking[]          @relation("custodian")
   createdKits         Kit[]
+  createdRooms        Room[]
   tierId              TierId             @default(free)
   tier                Tier               @relation(fields: [tierId], references: [id])
   assetReminders      AssetReminder[]
@@ -100,7 +101,7 @@ model User {
   // A user can have multiple asset index settings, 1 for each organization
   assetIndexSettings AssetIndexSettings[]
 
-  partialCheckins PartialBookingCheckin[] @relation("PartialCheckinUser")
+  partialCheckins  PartialBookingCheckin[]  @relation("PartialCheckinUser")
   partialCheckouts PartialBookingCheckout[] @relation("PartialCheckoutUser")
 
   // Updates feature
@@ -211,6 +212,8 @@ model Asset {
   locationId     String?
   kit            Kit?         @relation(fields: [kitId], references: [id])
   kitId          String?
+  room           Room?        @relation(fields: [roomId], references: [id])
+  roomId         String?
 
   custody      Custody?
   notes        Note[]
@@ -251,6 +254,7 @@ model Asset {
   @@index([categoryId, organizationId], name: "Asset_categoryId_organizationId_idx")
   @@index([locationId, organizationId], name: "Asset_locationId_organizationId_idx")
   @@index([kitId, organizationId], name: "Asset_kitId_organizationId_idx")
+  @@index([roomId, organizationId], name: "Asset_roomId_organizationId_idx")
   @@index([sequentialId], name: "Asset_sequentialId_idx")
   // Index for foreign key
   @@index([userId])
@@ -779,6 +783,7 @@ model Organization {
   images             Image[]              @relation("owner")
   bookings           Booking[]
   kits               Kit[]
+  rooms              Room[]
   assetIndexSettings AssetIndexSettings[]
   assetReminders     AssetReminder[]
   assetFilterPresets AssetFilterPreset[]
@@ -845,6 +850,7 @@ enum QrIdDisplayPreference {
 enum OrganizationRoles {
   ADMIN
   BASE
+  MEMBER
   OWNER
   SELF_SERVICE
 }
@@ -859,6 +865,7 @@ model SsoDetails {
 
   baseUserGroupId    String? // The group id for BASE users
   selfServiceGroupId String? // The group id for SELF_SERVICE users
+  memberGroupId      String? // The group id for MEMBER users
   adminGroupId       String? // The group id for ADMIN users
 
   // Datetime
@@ -1268,10 +1275,11 @@ model Booking {
   organizationId String
 
   assets Asset[]
+  rooms  Room[]
   notes  BookingNote[]
 
-  tags            Tag[]
-  partialCheckins PartialBookingCheckin[]
+  tags             Tag[]
+  partialCheckins  PartialBookingCheckin[]
   partialCheckouts PartialBookingCheckout[]
 
   // Datetime
@@ -1452,6 +1460,51 @@ model KitCustody {
 
   // Index for foreign key
   @@index([custodianId])
+}
+
+// BIG customization: reservable "Room" entity. A first-class bookable resource
+// (like an asset), with equipment (assets) assigned to it (like a location/kit)
+// and a color for UI highlighting (like a tag/category). MVP: no QR/custody/scan
+// — those are deliberately deferred and can be layered on later.
+model Room {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+  // Hex color (e.g. "#EF6820") used to highlight the room as a colored badge in
+  // the UI. Optional; reuses the same ColorInput + Badge pattern as Tag/Category.
+  color       String?
+  status      RoomStatus @default(AVAILABLE)
+
+  // Equipment assigned to this room. Mirrors Asset.locationId / Asset.kitId: an
+  // asset belongs to at most one room. roomId is set null on room delete.
+  assets Asset[]
+
+  // Reservations. Rooms are first-class bookable resources via an implicit m2m
+  // join (_BookingToRoom), exactly like Booking.assets. A room is reservable even
+  // when empty; adding a room to a booking also pulls in its assigned equipment
+  // (handled in the booking service, kit-style).
+  bookings Booking[]
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  organizationId String
+
+  createdBy   User   @relation(fields: [createdById], references: [id])
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Indexes for foreign keys
+  @@index([createdById])
+  @@index([organizationId])
+  @@index([organizationId, name])
+  @@index([organizationId, status])
+}
+
+enum RoomStatus {
+  AVAILABLE
+  CHECKED_OUT
 }
 
 model AssetReminder {
