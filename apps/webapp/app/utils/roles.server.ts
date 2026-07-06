@@ -94,7 +94,10 @@ export async function requirePermission({
   const role = roles ? roles[0] : OrganizationRoles.BASE;
 
   const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
+    role === OrganizationRoles.SELF_SERVICE ||
+    role === OrganizationRoles.BASE ||
+    // BIG customization: MEMBER mirrors SELF_SERVICE (restricted, non-admin).
+    role === OrganizationRoles.MEMBER;
 
   /**
    * This checks the organization settings permissions overrides for BASE and SELF_SERVICE roles
@@ -103,8 +106,9 @@ export async function requirePermission({
   const canSeeAllBookings =
     // Admin/Owner always can see all
     !isSelfServiceOrBase ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
+    // SELF_SERVICE (and MEMBER, which mirrors it) can see all if org setting allows
+    ((role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.MEMBER) &&
       currentOrganization.selfServiceCanSeeBookings) ||
     // BASE can see all if org setting allows
     (role === OrganizationRoles.BASE &&
@@ -114,8 +118,9 @@ export async function requirePermission({
   const canSeeAllCustody =
     // Admin/Owner always can see all
     !isSelfServiceOrBase ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
+    // SELF_SERVICE (and MEMBER, which mirrors it) can see all if org setting allows
+    ((role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.MEMBER) &&
       currentOrganization.selfServiceCanSeeCustody) ||
     // BASE can see all if org setting allows
     (role === OrganizationRoles.BASE &&
@@ -154,6 +159,11 @@ export function getRoleFromGroupId(
     groupIds.includes(ssoDetails.selfServiceGroupId)
   ) {
     return OrganizationRoles.SELF_SERVICE;
+  } else if (
+    ssoDetails.memberGroupId &&
+    groupIds.includes(ssoDetails.memberGroupId)
+  ) {
+    return OrganizationRoles.MEMBER;
   } else if (
     ssoDetails.baseUserGroupId &&
     groupIds.includes(ssoDetails.baseUserGroupId)

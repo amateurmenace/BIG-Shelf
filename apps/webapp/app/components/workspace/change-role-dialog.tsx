@@ -27,6 +27,7 @@ import {
 const roleOptions: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
   [OrganizationRoles.BASE]: "Base",
+  [OrganizationRoles.MEMBER]: "Member",
   [OrganizationRoles.SELF_SERVICE]: "Self service",
 };
 

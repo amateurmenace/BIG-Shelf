@@ -60,9 +60,11 @@ export function userHasCustodyViewPermission({
   // If user doesn't have standard permission, check for organization overrides
   if (!roles || !roles.length) return false;
 
-  // Check if the user is SELF_SERVICE and has the custody override
+  // Check if the user is SELF_SERVICE (or MEMBER, which mirrors it) and has the
+  // custody override
   if (
-    roles.includes(OrganizationRoles.SELF_SERVICE) &&
+    (roles.includes(OrganizationRoles.SELF_SERVICE) ||
+      roles.includes(OrganizationRoles.MEMBER)) &&
     organization.selfServiceCanSeeCustody
   ) {
     return true;

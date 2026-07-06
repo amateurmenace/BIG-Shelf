@@ -4,6 +4,7 @@ const ROLE_RANK: Record<OrganizationRoles, number> = {
   [OrganizationRoles.OWNER]: 3,
   [OrganizationRoles.ADMIN]: 2,
   [OrganizationRoles.SELF_SERVICE]: 1,
+  [OrganizationRoles.MEMBER]: 1,
   [OrganizationRoles.BASE]: 1,
 };
 

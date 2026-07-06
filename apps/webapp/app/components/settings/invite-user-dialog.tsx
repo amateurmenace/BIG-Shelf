@@ -48,6 +48,7 @@ export const InviteUserFormSchema = z.object({
       [
         OrganizationRoles.ADMIN,
         OrganizationRoles.BASE,
+        OrganizationRoles.MEMBER,
         OrganizationRoles.SELF_SERVICE,
       ],
       { message: "Please select a role" }
@@ -59,6 +60,7 @@ export const InviteUserFormSchema = z.object({
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
   [OrganizationRoles.BASE]: "Base",
+  [OrganizationRoles.MEMBER]: "Member",
   [OrganizationRoles.SELF_SERVICE]: "Self service",
 };
 

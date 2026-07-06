@@ -18,6 +18,7 @@ export type UserFriendlyRoles =
   | "Administrator"
   | "Owner"
   | "Base"
+  | "Member"
   | "Self service";
 export const meta = () => [{ title: appendToMetaTitle("Team settings") }];
 
@@ -45,6 +46,7 @@ export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
   [OrganizationRoles.OWNER]: "Owner",
   [OrganizationRoles.BASE]: "Base",
+  [OrganizationRoles.MEMBER]: "Member",
   [OrganizationRoles.SELF_SERVICE]: "Self service",
 };
 

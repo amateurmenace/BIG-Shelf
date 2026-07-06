@@ -17,9 +17,12 @@ export function useUserRoleHelper() {
   const isSelfService =
     roles?.includes(OrganizationRoles.SELF_SERVICE) || false;
   const isBase = roles?.includes(OrganizationRoles.BASE) || false;
+  // BIG customization: MEMBER mirrors SELF_SERVICE, so it shares the same
+  // "restricted, non-admin" UI treatment everywhere isBaseOrSelfService is used.
+  const isMember = roles?.includes(OrganizationRoles.MEMBER) || false;
 
-  /** A lot of actions share the same permissions for base & self service */
-  const isBaseOrSelfService = isBase || isSelfService;
+  /** A lot of actions share the same permissions for base, self service & member */
+  const isBaseOrSelfService = isBase || isSelfService || isMember;
 
   return {
     roles,
@@ -28,6 +31,7 @@ export function useUserRoleHelper() {
     isAdministratorOrOwner,
     isSelfService,
     isBase,
+    isMember,
     isBaseOrSelfService,
   };
 }
