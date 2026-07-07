@@ -57,7 +57,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   try {
     if (context.isAuthenticated && !isMobile) {
-      return redirect("/assets");
+      // BIG: default landing is the home dashboard
+      return redirect("/home");
     }
 
     if (disableSSO) {

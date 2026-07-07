@@ -53,7 +53,8 @@ export function loader({ context }: LoaderFunctionArgs) {
       });
     }
     if (context.isAuthenticated) {
-      return redirect("/assets");
+      // BIG: default landing is the home dashboard
+      return redirect("/home");
     }
 
     return data(payload({ title, subHeading }));

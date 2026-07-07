@@ -130,7 +130,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
         // If org exists (SCIM SSO case), redirect to that org
         if (org?.id) {
-          return redirect(safeRedirect(redirectTo || "/assets"), {
+          // BIG: default landing is the home dashboard (deep-links preserved)
+          return redirect(safeRedirect(redirectTo || "/home"), {
             headers: [setCookie(await setSelectedOrganizationIdCookie(org.id))],
           });
         }
@@ -150,7 +151,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
           return redirect("/sso-pending-assignment");
         }
 
-        return redirect(safeRedirect(redirectTo || "/assets"));
+        // BIG: default landing is the home dashboard (deep-links preserved)
+        return redirect(safeRedirect(redirectTo || "/home"));
       }
     }
 
@@ -166,7 +168,8 @@ export function loader({ context }: LoaderFunctionArgs) {
   const subHeading = "Please wait while we connect your account";
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    // BIG: default landing is the home dashboard
+    return redirect("/home");
   }
 
   return data(payload({ title, subHeading }));
@@ -180,7 +183,8 @@ export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();
   const { data } = fetcher;
   const [searchParams] = useSearchParams();
-  const redirectTo = searchParams.get("redirectTo") ?? "/assets";
+  // BIG: default landing is the home dashboard
+  const redirectTo = searchParams.get("redirectTo") ?? "/home";
 
   useEffect(() => {
     const {

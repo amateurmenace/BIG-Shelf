@@ -32,7 +32,8 @@ export const meta: MetaFunction = () => [
 
 export async function loader({ context }: LoaderFunctionArgs) {
   if (!ENABLE_PREMIUM_FEATURES) {
-    return redirect("/assets");
+    // BIG: default landing is the home dashboard
+    return redirect("/home");
   }
 
   const authSession = context.getSession();
@@ -170,7 +171,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
-    return redirect("/assets");
+    // BIG: default landing is the home dashboard
+    return redirect("/home");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

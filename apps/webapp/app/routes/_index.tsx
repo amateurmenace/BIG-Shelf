@@ -6,7 +6,8 @@ export const meta = () => [{ title: appendToMetaTitle("Home") }];
 
 export const loader = ({ context }: LoaderFunctionArgs) => {
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    // BIG: default landing is the home dashboard
+    return redirect("/home");
   }
 
   return redirect("/login");

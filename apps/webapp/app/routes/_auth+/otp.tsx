@@ -41,7 +41,8 @@ export function loader({ context, request }: LoaderFunctionArgs) {
   const title = getOtpPageData(mode).title;
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    // BIG: default landing is the home dashboard
+    return redirect("/home");
   }
 
   return payload({ title });
@@ -116,7 +117,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        return redirect(safeRedirect("/assets"), {
+        // BIG: default landing is the home dashboard
+        return redirect(safeRedirect("/home"), {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
           ],

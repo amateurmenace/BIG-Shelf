@@ -53,7 +53,8 @@ export function loader({ context }: LoaderFunctionArgs) {
   const { disableSignup, disableSSO } = config;
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    // BIG: default landing is the home dashboard
+    return redirect("/home");
   }
 
   return data(payload({ title, subHeading, disableSignup, disableSSO }));
@@ -139,10 +140,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        // Set the auth session and redirect to the assets page
+        // Set the auth session and redirect to the home dashboard
         context.setSession(authSession);
 
-        return redirect(safeRedirect(redirectTo || "/assets"), {
+        // BIG: default landing is the home dashboard (deep-links preserved)
+        return redirect(safeRedirect(redirectTo || "/home"), {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
           ],

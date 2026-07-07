@@ -236,9 +236,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       } satisfies Prisma.UserSelect,
     });
 
-    /** If the user is already onboarded, we assume they finished the process so we send them to the index */
+    /** If the user is already onboarded, we assume they finished the process so we send them to the home dashboard */
     if (user.onboarded) {
-      return redirect("/assets");
+      // BIG: default landing is the home dashboard
+      return redirect("/home");
     }
 
     const authUser = await getAuthUserById(userId);
