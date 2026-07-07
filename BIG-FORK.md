@@ -62,6 +62,35 @@ The change tiers, cheapest/safest first:
 
 ---
 
+## What we've customized (not in upstream)
+
+Two BIG-only features live in this fork — they do **not** exist in upstream
+shelf.nu, so a `git merge upstream/main` will conflict in the "core edits" listed
+below. When it does, that's expected: reconcile by keeping BIG's additions on top
+of upstream's changes.
+
+- **Rooms** (shipped 2026-07) — a reservable entity (like Kit/Location) with a
+  color. Reserving a room adds it to a booking and pulls in its assigned
+  equipment.
+  - _Additive (conflict-free):_ `app/modules/room/`, `app/components/rooms/`,
+    `app/routes/_layout+/rooms.*`, the `Room` + `RoomStatus` models.
+  - _Core edits (conflict-prone):_ `Asset.roomId` + `Booking.rooms` in the
+    schema; `updateBookingRooms` / `removeBookingRooms` + room conflict detection
+    in `app/modules/booking/`; the booking overview loader + `booking-assets-column.tsx`;
+    `assertRoomsBelongToOrg` in `app/utils/org-validation.server.ts`; the sidebar
+    nav hook (`use-sidebar-nav-items.tsx`).
+- **Member role** (shipped 2026-07) — a new `OrganizationRoles` value mirroring
+  `SELF_SERVICE`.
+  - _Core edits (conflict-prone):_ the `OrganizationRoles` enum + `Room`
+    permission entity in `permission.data.ts`; `roles.ts` + `roles.server.ts`;
+    the invite / change-role dialogs; `settings.team.tsx`; the SSO group mapping.
+
+**Not built yet (deferred):** for Rooms — QR codes, custody, scanner check-in/out,
+bulk actions, mobile API, CSV import. For Member — the mobile **companion** app
+(owned by another team) and the admin **update-targeting** checkbox.
+
+---
+
 ## Building a feature (Tier 1)
 
 ```bash

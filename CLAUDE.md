@@ -2,6 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## BIG Fork — Local Customizations
+
+> This repo is **Brookline Interactive Group's self-hosted fork** of shelf.nu.
+> `origin` is our private repo; `upstream` is `Shelf-nu/shelf.nu` (pull-only).
+> See **[`BIG-FORK.md`](./BIG-FORK.md)** in the repo root for the fork workflow:
+> remotes, the safe-customization tiers, deployment, and pulling upstream.
+
+Two features are **BIG-only** — they do **not** exist in upstream shelf.nu, so
+expect merge conflicts in these areas when pulling upstream:
+
+- **Rooms** — a reservable entity with a color that holds equipment (assets) and
+  can be reserved in bookings (which also pulls in its gear). New code lives in
+  `app/modules/room/`, `app/components/rooms/`, and `app/routes/_layout+/rooms.*`;
+  core-edit touch points are the booking service/overview, the schema
+  (`Asset.roomId`, `Booking.rooms`), the permission matrix (`room` entity), and
+  the sidebar nav.
+- **Member role** — a new `OrganizationRoles` value mirroring `SELF_SERVICE`,
+  wired through the permission matrix, the invite/change-role UIs, and SSO
+  mapping.
+
+When adding new BIG features, prefer **additive** files (new modules / routes /
+components) over editing upstream files, to keep upstream merges clean.
+
 ## Essential Commands
 
 This is a **pnpm + Turborepo monorepo**. Use `pnpm` instead of `npm`.
