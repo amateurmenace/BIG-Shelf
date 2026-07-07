@@ -287,7 +287,7 @@ export default function EmailSettingsPage() {
  */
 const EMAIL_PREVIEW_VIEW_BUTTON_STYLE = {
   display: "inline-block",
-  backgroundColor: "#EF6820",
+  backgroundColor: "#BE4598", // BIG: brand magenta (matches emailPrimaryColor)
   color: "white",
   fontSize: "14px",
   fontWeight: "700",
@@ -368,9 +368,10 @@ function EmailPreview({
                 marginBottom: "32px",
               }}
             >
+              {/* BIG: mirror the transactional email, which now uses the BIG Shelf logo */}
               <img
-                src="/static/images/logo-full-color(x2).png"
-                alt="Shelf logo"
+                src="/static/images/big/big-shelf-full.png"
+                alt="BIG Shelf logo"
                 style={{ height: "32px", width: "auto" }}
               />
             </div>

@@ -64,7 +64,8 @@ export default function OrganizationSelector() {
           <DropdownMenuTrigger disabled={isSwitchingOrg} asChild>
             <SidebarMenuButton
               className={tw(
-                "size-full truncate !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50",
+                // BIG: dark sidebar — open/hover use the indigo accent, not light gray
+                "size-full truncate !p-1 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 open || openMobile ? "border" : ""
               )}
             >

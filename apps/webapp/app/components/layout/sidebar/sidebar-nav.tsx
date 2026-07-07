@@ -100,7 +100,8 @@ function NavItemRenderer({
       return (
         <SidebarMenuItem onClick={navItem.onClick}>
           <SidebarMenuButton className="font-semibold" tooltip={navItem.title}>
-            <navItem.Icon className="size-4 text-gray-600" />
+            {/* BIG: dark sidebar — light icon color */}
+            <navItem.Icon className="size-4 text-sidebar-foreground" />
             <span>{navItem.title}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>

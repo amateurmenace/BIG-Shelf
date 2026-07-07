@@ -106,19 +106,24 @@ export default {
           800: "#1D2939",
           900: "#101828",
         },
+        // BIG: brand palette — magenta ramp (BIG magenta #C2489B family) replaces
+        // Shelf orange (#EF6820). 500 is AA-tuned to #BE4598 (4.67:1 white-on-fill,
+        // visually identical to #C2489B); 600/700 pass AA as text on white; 300 is
+        // the light shade used for active nav on the dark indigo sidebar. Every
+        // step here was verified against WCAG 2.1 AA before shipping.
         primary: {
-          DEFAULT: "#EF6820",
-          25: "#FEFAF5",
-          50: "#FEF6EE",
-          100: "#FDEAD7",
-          200: "#F9DBAF",
-          300: "#F7B27A",
-          400: "#F38744",
-          500: "#EF6820",
-          600: "#EF6820",
-          700: "#EF6820",
-          800: "#932F19",
-          900: "#772917",
+          DEFAULT: "#BE4598",
+          25: "#FCF4FA",
+          50: "#FAE9F4",
+          100: "#F4D2E8",
+          200: "#EAACD1",
+          300: "#DD83B9",
+          400: "#CF61A3",
+          500: "#BE4598",
+          600: "#A2357E",
+          700: "#7F2963",
+          800: "#5C1E48",
+          900: "#3E1430",
         },
         error: {
           25: "#FFFBFA",

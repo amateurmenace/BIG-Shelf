@@ -1,0 +1,13 @@
+<!-- BIG Shelf full logo — LIGHT wordmark for DARK backgrounds (the indigo sidebar).
+     Rainbow arc + "BIG" (white) "Shelf" (light magenta, primary-300). Mirrors
+     big-shelf-full.svg geometry; only the wordmark fills differ. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 212 40" fill="none">
+  <g>
+    <path d="M5 31 A19 19 0 0 1 43 31" stroke="#C2489B" stroke-width="5.5" stroke-linecap="round" />
+    <path d="M11.2 31 A12.8 12.8 0 0 1 36.8 31" stroke="#F08A20" stroke-width="5.5" stroke-linecap="round" />
+    <path d="M17.4 31 A6.6 6.6 0 0 1 30.6 31" stroke="#FBE64A" stroke-width="5.5" stroke-linecap="round" />
+  </g>
+  <text x="56" y="31" font-family="Helvetica, Arial, sans-serif" font-size="29" font-weight="700">
+    <tspan fill="#FFFFFF">BIG</tspan><tspan dx="7" fill="#DD83B9">Shelf</tspan>
+  </text>
+</svg>

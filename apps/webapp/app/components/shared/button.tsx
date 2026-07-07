@@ -120,10 +120,12 @@ function isLinkProps(props: object): props is LinkButtonProps {
  * Style mappings for button variants
  */
 const variants: Record<ButtonVariant, string> = {
+  // BIG: hover darkens (500→600) instead of lightening (500→400) so both the rest
+  // and hover states keep white-text contrast ≥ WCAG AA on the magenta fill.
   primary: tw(
-    `border-primary-400 bg-primary-500 text-white focus:ring-2`,
+    `border-primary-500 bg-primary-500 text-white focus:ring-2`,
     "disabled:border-primary-300 disabled:bg-primary-300",
-    "enabled:hover:bg-primary-400"
+    "enabled:hover:bg-primary-600"
   ),
   secondary: tw(
     `border-gray-300 bg-white text-gray-700`,

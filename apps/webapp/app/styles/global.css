@@ -17,13 +17,16 @@
 
 :root {
   --tw-ring-color: #eaf2ff;
-  --sidebar-background: theme(colors.white);
-  --sidebar-foreground: 240 5.3% 26.1%;
-  --sidebar-primary: 240 5.9% 10%;
-  --sidebar-primary-foreground: 0 0% 98%;
-  --sidebar-accent: 240 4.8% 95.9%;
-  --sidebar-accent-foreground: 240 5.9% 10%;
-  --sidebar-border: 220 13% 91%;
+  /* BIG: dark indigo sidebar (#2A2560 surface, light lavender text) replaces the
+     stock white sidebar. Tokens verified WCAG AA on the indigo surface —
+     foreground 9.1:1, accent (hover) text 9.8:1, white 13.7:1. */
+  --sidebar-background: #2a2560;
+  --sidebar-foreground: 245 30% 86%;
+  --sidebar-primary: 322 46% 62%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 245 33% 34%;
+  --sidebar-accent-foreground: 245 30% 94%;
+  --sidebar-border: 245 20% 55%;
 }
 
 html {

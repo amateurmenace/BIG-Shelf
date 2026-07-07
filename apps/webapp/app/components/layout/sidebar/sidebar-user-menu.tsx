@@ -37,10 +37,11 @@ export default function SidebarUserMenu() {
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
+          {/* BIG: dark sidebar — trigger open/hover use the indigo accent, not light gray */}
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="!h-auto border !p-1 data-[state=open]:bg-gray-50 data-[state=open]:text-sidebar-accent-foreground hover:bg-gray-50"
+              className="!h-auto border !p-1 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             >
               <ProfilePicture
                 width="w-8"

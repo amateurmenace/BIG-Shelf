@@ -15,13 +15,14 @@ export const ShelfSidebarLogo = ({ minimized }: { minimized: boolean }) => {
     return minimized ? (
       <img
         src={logoPath.symbol}
-        alt="Shelf Logo"
+        alt="BIG Shelf"
         className="mx-1.5 inline h-[32px] transition duration-150 ease-linear"
       />
     ) : (
       <img
-        src={logoPath.fullLogo}
-        alt="Shelf Logo"
+        // BIG: dark indigo sidebar → prefer the light-wordmark logo variant
+        src={logoPath.fullLogoLight ?? logoPath.fullLogo}
+        alt="BIG Shelf"
         className="mx-1.5 inline h-[32px] transition duration-150 ease-linear"
       />
     );
@@ -31,7 +32,7 @@ export const ShelfSidebarLogo = ({ minimized }: { minimized: boolean }) => {
     <>
       <img
         src="/static/images/shelf-symbol.png"
-        alt="Shelf Logo"
+        alt="BIG Shelf"
         className="mx-1.5 inline h-[32px]"
       />
       <When truthy={!minimized}>

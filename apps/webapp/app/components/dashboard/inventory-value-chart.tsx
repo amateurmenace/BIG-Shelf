@@ -24,6 +24,7 @@ export default function InventoryValueChart() {
               data-testid="inventory-value-layout"
               className="flex flex-col items-center gap-6 md:flex-row md:items-end md:justify-evenly"
             >
+              {/* BIG: brand magenta progress ring */}
               <ClientOnly
                 fallback={<FallbackLoading className="size-[150px]" />}
               >
@@ -31,7 +32,7 @@ export default function InventoryValueChart() {
                   <ProgressCircle
                     value={(valueKnownAssets / totalAssets) * 100}
                     size="xl"
-                    color="orange"
+                    color="pink"
                     className="relative"
                   >
                     <span className="block text-center text-xs font-medium text-gray-600">

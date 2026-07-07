@@ -43,7 +43,7 @@ export interface DistributionDonutProps {
  * Uses a harmonious progression from warm to cool colors.
  */
 const DISTRIBUTION_COLORS = [
-  "orange", // Primary (Shelf brand)
+  "pink", // BIG: brand magenta (Primary)
   "blue", // Secondary
   "emerald", // Tertiary
   "violet", // Quaternary
@@ -231,6 +231,7 @@ export function DistributionDonut({
  */
 function getColorValue(colorName: string): string {
   const colorMap: Record<string, string> = {
+    pink: "#ec4899", // BIG: brand magenta lead
     orange: "#f97316",
     blue: "#3b82f6",
     emerald: "#10b981",

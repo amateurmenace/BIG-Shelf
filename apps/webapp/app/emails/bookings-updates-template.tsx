@@ -189,7 +189,7 @@ export function BookingUpdatesEmailTemplate({
                 and {assets.length - BOOKING_EMAIL_ASSETS_DISPLAY_LIMIT} more —{" "}
                 <a
                   href={`${SERVER_URL}/bookings/${booking.id}?orgId=${booking.organizationId}`}
-                  style={{ color: "#EF6820" }}
+                  style={{ color: "#BE4598" /* BIG: brand magenta */ }}
                 >
                   View full booking
                 </a>

@@ -27,13 +27,16 @@ import {
 
 import type { ChartSeries } from "~/modules/reports/types";
 
-/** Color palette for multi-series charts */
+/**
+ * Color palette for multi-series charts.
+ * BIG: brand-forward — BIG magenta/orange/indigo lead, then distinct hues.
+ */
 const SERIES_COLORS = [
-  "#EF6820", // primary-500 (Shelf orange)
-  "#22c55e", // green-500
-  "#3b82f6", // blue-500
-  "#a855f7", // purple-500
-  "#f59e0b", // amber-500
+  "#BE4598", // BIG magenta (primary-500)
+  "#F08A20", // BIG orange
+  "#2A2560", // BIG indigo
+  "#12B76A", // green-500 (extra series)
+  "#3b82f6", // blue-500 (extra series)
 ];
 
 /** Shelf's color palette for charts */

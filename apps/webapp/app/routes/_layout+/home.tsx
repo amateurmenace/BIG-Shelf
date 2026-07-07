@@ -368,31 +368,33 @@ export default function HomePage() {
             <KpiCards />
           </div>
 
-          {/* Row 1: Trends & Value — wide chart + value card */}
-          <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-            <div className="xl:col-span-2">
-              <AssetGrowthChart />
-            </div>
-            <InventoryValueChart />
+          {/* BIG: Row 1 (top) — the booking pipeline up front (Upcoming, Active,
+              Overdue). The Asset Growth chart that used to fill this slot now
+              sits at the bottom of the dashboard. */}
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <UpcomingBookings />
+            <ActiveBookings />
+            <OverdueBookings />
           </div>
 
           {/* Widget Grid — 3-column rows */}
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {/* Row 2: Bookings pipeline */}
-            <UpcomingBookings />
-            <ActiveBookings />
-            <OverdueBookings />
-
-            {/* Row 3: Reminders, Status & Locations */}
+            {/* Inventory value + Reminders, Status & Locations */}
+            <InventoryValueChart />
             <UpcomingReminders />
             <AssetsByStatusChart />
             <LocationDistribution />
           </div>
 
-          {/* Row 4: People & Assets — 2-column */}
+          {/* Row: People & Assets — 2-column */}
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             <CustodiansList />
             <NewestAssets />
+          </div>
+
+          {/* BIG: Asset Growth trend moved to the bottom (least time-sensitive). */}
+          <div className="mt-4">
+            <AssetGrowthChart />
           </div>
         </div>
       ) : (

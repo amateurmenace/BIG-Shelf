@@ -71,7 +71,8 @@ export default function ParentNavItem({
             tooltip={tooltip}
             onClick={handleClick}
           >
-            <route.Icon className="size-4 text-gray-600" />
+            {/* BIG: dark sidebar — light icon color */}
+            <route.Icon className="size-4 text-sidebar-foreground" />
             <span className="font-semibold">{route.title}</span>
             <ChevronDownIcon className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
           </SidebarMenuButton>
@@ -110,8 +111,9 @@ function NestedRouteRenderer({
           to={nested.to}
           target={nested.target}
           className={tw(
-            "font-medium hover:bg-gray-100",
-            isChildActive && "bg-transparent font-bold !text-primary"
+            // BIG: dark sidebar — accent hover + light-magenta active text
+            "font-medium hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+            isChildActive && "bg-transparent font-bold !text-primary-300"
           )}
         >
           {nested.title}

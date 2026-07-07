@@ -17,12 +17,17 @@ export const config: Config = {
   disableSignup: DISABLE_SIGNUP || false,
   disableSSO: DISABLE_SSO || false,
 
+  // BIG: BIG Shelf branding — rainbow arc + wordmark. fullLogo carries a dark
+  // wordmark for light surfaces (email, auth, mobile header); fullLogoLight a
+  // light wordmark for the dark indigo sidebar; symbol is the universal arc.
   logoPath: {
-    fullLogo: "/static/images/logo-full-color(x2).png",
-    symbol: "/static/images/shelf-symbol.png",
+    fullLogo: "/static/images/big/big-shelf-full.png",
+    symbol: "/static/images/big/big-shelf-symbol.png",
+    fullLogoLight: "/static/images/big/big-shelf-full-light.png",
   },
-  faviconPath: "/static/favicon.ico",
-  emailPrimaryColor: "#EF6820",
+  faviconPath: "/static/images/big/big-shelf-favicon.png",
+  // BIG: brand magenta (AA-tuned, matches primary-500) replaces Shelf orange
+  emailPrimaryColor: "#BE4598",
   showHowDidYouFindUs: SHOW_HOW_DID_YOU_FIND_US || false,
   collectBusinessIntel:
     COLLECT_BUSINESS_INTEL || SHOW_HOW_DID_YOU_FIND_US || false,

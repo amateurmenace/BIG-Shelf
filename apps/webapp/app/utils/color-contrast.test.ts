@@ -238,8 +238,9 @@ describe("Color Contrast Utilities", () => {
       // The color-50 and color-100 backgrounds should pair with color-700 or color-800 text
 
       it("should document primary color combinations", () => {
-        const primaryColor = "#EF6820";
-        const primaryBg50 = "#FEF6EE";
+        // BIG: brand magenta primary-500 on primary-50
+        const primaryColor = "#BE4598";
+        const primaryBg50 = "#FAE9F4";
         const ratio = getContrastRatio(primaryColor, primaryBg50);
 
         console.log(

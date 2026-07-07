@@ -31,11 +31,16 @@ export default function ChildNavItem({
           target={route.target}
           className={tw(
             "font-semibold",
-            isActive ? "bg-transparent font-bold text-primary" : ""
+            // BIG: dark sidebar — active uses light magenta readable on indigo
+            isActive ? "bg-transparent font-bold !text-primary-300" : ""
           )}
         >
           <route.Icon
-            className={tw("size-4 text-gray-600", isActive && "text-primary")}
+            // BIG: dark sidebar — light icon, light-magenta when active
+            className={tw(
+              "size-4 text-sidebar-foreground",
+              isActive && "!text-primary-300"
+            )}
           />
           <span>{route.title}</span>
         </NavLink>

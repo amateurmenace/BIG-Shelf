@@ -22,6 +22,9 @@ export interface Config {
   logoPath?: {
     fullLogo: string;
     symbol: string;
+    // BIG: optional light-wordmark variant of the full logo, for dark surfaces
+    // like the indigo sidebar. Falls back to fullLogo when absent.
+    fullLogoLight?: string;
   };
 
   /**
