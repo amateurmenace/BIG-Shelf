@@ -3,7 +3,7 @@
 # produce a minimal @shelf/webapp image. App listens on PORT=8080 (set in the
 # Dockerfile). See https://fly.io/docs/reference/configuration/.
 app = "big-shelf"
-primary_region = "ewr" # Newark, NJ — closest available region to Brookline (Fly deprecated bos)
+primary_region = "sjc" # San Jose, CA — co-located with the Supabase DB (AWS us-west-2, Oregon) to cut per-query latency ~70ms → ~15ms
 
 [build]
   dockerfile = "apps/webapp/Dockerfile"
@@ -14,12 +14,11 @@ primary_region = "ewr" # Newark, NJ — closest available region to Brookline (F
 [http_service]
   internal_port = 8080
   force_https = true
-  # Scale to zero when idle to keep test costs near $0; cold start is a few
-  # seconds on the first request. Set min_machines_running = 1 for production
-  # so background workers/scheduler stay running.
+  # Keep one machine always warm (no cold starts) now that this is in real
+  # production use; any extra machines still auto-stop when idle.
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [[vm]]
   size = "shared-cpu-1x"
