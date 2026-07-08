@@ -26,6 +26,7 @@ import {
 } from "~/components/shared/tooltip";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { bookingNeedsAgreementSignature } from "~/modules/big-loan-agreement/service.server";
 import { getBookingHeaderData } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -90,6 +91,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    // BIG: every reservation must have its loan agreement signed before
+    // checkout. Surface it proactively so checkout never fails silently — the
+    // same check gates the actual checkout server-side.
+    const needsLoanAgreementSignature = await bookingNeedsAgreementSignature({
+      bookingId,
+      organizationId,
+    });
+
     const header: HeaderData = {
       title: booking.name,
     };
@@ -97,6 +106,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return payload({
       booking,
       header,
+      needsLoanAgreementSignature,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -120,7 +130,8 @@ export const shouldRevalidate = skipRevalidationOnClientViewChange;
 export default function AssetDetailsPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
-  const { booking } = useLoaderData<typeof loader>();
+  const { booking, needsLoanAgreementSignature } =
+    useLoaderData<typeof loader>();
   const { roles } = useUserRoleHelper();
 
   const items = [
@@ -169,6 +180,26 @@ export default function AssetDetailsPage() {
             }}
           />
           <HorizontalTabs items={items} />
+          {needsLoanAgreementSignature ? (
+            <div className="mt-4 flex flex-col gap-3 rounded-lg border border-warning-300 bg-warning-50 p-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  Loan agreement not signed
+                </p>
+                <p className="text-sm text-gray-600">
+                  This reservation must have its loan agreement signed before it
+                  can be checked out.
+                </p>
+              </div>
+              <Button
+                to={`/loan-agreement/${booking.id}`}
+                variant="secondary"
+                className="shrink-0 whitespace-nowrap"
+              >
+                Review &amp; sign
+              </Button>
+            </div>
+          ) : null}
         </>
       )}
       <div>

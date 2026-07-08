@@ -71,6 +71,39 @@ export async function getActiveTemplate(
 }
 
 /**
+ * Whether a booking still needs its loan agreement signed before it can be
+ * checked out. BIG enforces the agreement on **every** reservation, so this is
+ * `true` for any unsigned booking once the workspace has a template. Returns
+ * `false` (no signature required) only when:
+ * - the workspace has no agreement template (agreements are opt-in per org), or
+ * - the booking already has a signature.
+ *
+ * Single source of truth for both the checkout gate
+ * ({@link file://./../booking/service.server.ts}) and the proactive
+ * "sign first" banner on the booking page, so the two never disagree.
+ *
+ * @param args.bookingId - The booking to evaluate
+ * @param args.organizationId - The caller's workspace (scoping guard)
+ * @returns `true` when a signature is still required before checkout
+ */
+export async function bookingNeedsAgreementSignature({
+  bookingId,
+  organizationId,
+}: {
+  bookingId: string;
+  organizationId: string;
+}): Promise<boolean> {
+  // Opt-in: no template configured for this workspace → never required.
+  const template = await getActiveTemplate(organizationId);
+  if (!template) {
+    return false;
+  }
+
+  // Every reservation is gated → required only until it has been signed.
+  return !(await hasSignedForBooking({ bookingId, organizationId }));
+}
+
+/**
  * Returns the org's agreement template, creating it from the default on first
  * use. Use this from surfaces that need a template to exist (admin editor,
  * signing page); use {@link getActiveTemplate} where a missing template should
