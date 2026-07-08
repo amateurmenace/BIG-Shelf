@@ -34,21 +34,14 @@ export default function App() {
           <Outlet />
         </div>
       </div>
-      <aside className="relative hidden h-full flex-col items-end justify-end p-8 lg:flex lg:w-[700px] xl:w-[900px]">
-        {/* eslint-disable react/jsx-no-target-blank */}
-        <a
-          href="https://www.shelf.nu/?ref=shelf_app_auth_image"
-          className="relative z-20 mt-4 w-[150px] text-right text-sm text-white no-underline hover:text-white/80"
-          target="_blank"
-        >
-          shelf.nu
-        </a>
-        <img
-          className="absolute inset-0 size-full max-w-none object-cover"
-          src="/static/images/auth-cover.webp"
-          alt="John Singer Sargent - A Corner of the Library in Venice, 1904/1907 "
-        />
-      </aside>
+      {/* Decorative hero. A CSS background (not <img>) so a missing file degrades
+          to a solid panel instead of a broken-image icon. Drop the studio photo at
+          public/static/images/big/login-hero.jpg and it appears automatically. */}
+      <aside
+        aria-hidden="true"
+        className="relative hidden h-full bg-gray-900 bg-cover bg-center lg:block lg:w-[700px] xl:w-[900px]"
+        style={{ backgroundImage: "url('/static/images/big/login-hero.jpg')" }}
+      />
     </main>
   );
 }

@@ -23,7 +23,6 @@ import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { isNeonOAuthConfigured } from "~/integrations/neon-crm/client.server";
-import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 
 import {
@@ -203,37 +202,64 @@ export default function IndexLoginForm() {
   /** Focus the email field on mount (intentional first-field focus on auth pages). */
   const emailInputRef = useAutoFocus<HTMLInputElement>();
 
+  /** Whether any one-click sign-in (Google / Microsoft / Neon) is available. */
+  const hasQuickSignIn =
+    googleLoginEnabled || microsoftLoginEnabled || neonLoginEnabled;
+
   return (
     <div className="w-full max-w-md">
       {acceptedInvite ? (
-        <div className="mb-8 text-center text-success-600">
-          Successfully accepted workspace invite. Please login to see your new
-          workspace.
+        <div className="mb-6 rounded-lg border border-success-200 bg-success-50 p-3 text-center text-sm text-success-700">
+          Invite accepted — log in below to open your new workspace.
+        </div>
+      ) : null}
+      {passwordReset ? (
+        <div className="mb-6 rounded-lg border border-success-200 bg-success-50 p-3 text-center text-sm text-success-700">
+          Password reset — log in with your new password.
         </div>
       ) : null}
 
-      {passwordReset ? (
-        <div className="mb-8 text-center text-success-600">
-          You have successfully reset your password. You can now use your new
-          password to login.
+      {/* Primary: one-click sign-in (social + Neon members) */}
+      {hasQuickSignIn ? (
+        <div className="flex flex-col gap-2.5">
+          <SocialLoginButtons
+            google={googleLoginEnabled}
+            microsoft={microsoftLoginEnabled}
+          />
+          {neonLoginEnabled ? (
+            <Button variant="secondary" width="full" to="/neon-login">
+              Continue with Neon
+            </Button>
+          ) : null}
         </div>
       ) : null}
-      <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
-        <div>
-          <Input
-            ref={emailInputRef}
-            data-test-id="email"
-            label="Email address"
-            placeholder="zaans@huisje.com"
-            required
-            name={zo.fields.email()}
-            type="email"
-            autoComplete="username"
-            disabled={disabled}
-            inputClassName="w-full"
-            error={zo.errors.email()?.message || data?.error.message}
-          />
+
+      {/* Divider before the email/password fallback */}
+      {hasQuickSignIn ? (
+        <div className="my-6 flex items-center gap-3">
+          <span className="h-px flex-1 bg-gray-200" />
+          <span className="text-xs font-medium uppercase tracking-wide text-gray-400">
+            or with email
+          </span>
+          <span className="h-px flex-1 bg-gray-200" />
         </div>
+      ) : null}
+
+      {/* Secondary: email + password */}
+      <Form ref={zo.ref} method="post" replace className="flex flex-col gap-3">
+        <Input
+          ref={emailInputRef}
+          data-test-id="email"
+          label="Email"
+          placeholder="you@brooklineinteractive.org"
+          required
+          name={zo.fields.email()}
+          type="email"
+          autoComplete="username"
+          disabled={disabled}
+          inputClassName="w-full"
+          error={zo.errors.email()?.message || data?.error.message}
+        />
         <PasswordInput
           label="Password"
           placeholder="**********"
@@ -246,82 +272,47 @@ export default function IndexLoginForm() {
         />
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
         <Button
-          className="text-center"
           type="submit"
           data-test-id="login"
+          width="full"
           disabled={disabled}
         >
-          Log In
+          Log in
         </Button>
-        <div className="flex flex-col items-center justify-center">
-          <div className="text-center text-sm text-gray-500">
-            Don't remember your password?{" "}
-            <Button
-              variant="link"
-              to={{
-                pathname: "/forgot-password",
-                search: searchParams.toString(),
-              }}
-            >
-              Reset password
-            </Button>
-          </div>
-        </div>
       </Form>
-      {/* BIG: Google/Microsoft social login (sign in + sign up). */}
-      <SocialLoginButtons
-        google={googleLoginEnabled}
-        microsoft={microsoftLoginEnabled}
-      />
-      {!disableSSO && (
-        <div className="mt-6 text-center">
-          <Button variant="link" to="/sso-login">
-            Login with SSO
-          </Button>
-        </div>
-      )}
-      {/* BIG: members sign in through Neon CRM (their membership = access). */}
-      {neonLoginEnabled && (
-        <div className="mt-6">
-          <Button variant="secondary" width="full" to="/neon-login">
-            Log in with Neon
-          </Button>
-        </div>
-      )}
 
-      <div className="mt-6">
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-300" />
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="bg-white px-2 text-gray-500">
-              Or use a{" "}
-              <strong title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email.">
-                One Time Password
-              </strong>
-            </span>
-          </div>
-        </div>
-        <div className="mt-6">
-          <ContinueWithEmailForm mode="login" />
-        </div>
-        {disableSignup ? null : (
-          <div className="mt-6 text-center text-sm text-gray-500">
-            Don't have an account?{" "}
-            <Button
-              variant="link"
-              data-test-id="signupButton"
-              to={{
-                pathname: "/join",
-                search: searchParams.toString(),
-              }}
-            >
-              Sign up
+      {/* Secondary links: reset password + SSO */}
+      <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-gray-500">
+        <Button
+          variant="link"
+          to={{ pathname: "/forgot-password", search: searchParams.toString() }}
+        >
+          Forgot password?
+        </Button>
+        {!disableSSO ? (
+          <>
+            <span className="text-gray-300">·</span>
+            <Button variant="link" to="/sso-login">
+              Log in with SSO
             </Button>
-          </div>
-        )}
+          </>
+        ) : null}
       </div>
+
+      {/* Sign up — a prominent action, not a buried link */}
+      {disableSignup ? null : (
+        <div className="mt-8 rounded-lg border border-gray-200 bg-gray-50 p-4 text-center">
+          <p className="mb-3 text-sm text-gray-600">New to BIG Shelf?</p>
+          <Button
+            variant="secondary"
+            width="full"
+            data-test-id="signupButton"
+            to={{ pathname: "/join", search: searchParams.toString() }}
+          >
+            Create an account
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

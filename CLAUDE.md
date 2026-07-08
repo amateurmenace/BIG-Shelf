@@ -42,6 +42,20 @@ additions on top of upstream's changes.
   log per asset. Additive: `app/modules/big-asset-condition/`,
   `app/routes/_layout+/assets.$assetId.condition.tsx`. Core edit: the tab
   registration in `assets.$assetId.tsx`.
+- **Social login (Google / Microsoft) + redesigned auth pages** — Supabase OAuth
+  "Continue with Google/Microsoft" that both signs in AND signs up (existing users
+  log in; a new social identity is provisioned a Shelf user + personal workspace;
+  an email already tied to another account is rejected). The login + join pages
+  were redesigned social-first (brand-logo buttons primary, email/password
+  minimized under an "or with email" divider, "Sign up"/"Log in" as prominent
+  buttons); invitees also set their own password on the accept-invite page.
+  Additive: `app/modules/big-social-auth/`,
+  `app/components/big/social-login-buttons.tsx`, `app/routes/_auth+/oauth.social.*`.
+  Core edits: `login.tsx`, `join.tsx`, `_auth.tsx` (layout + hero image at
+  `public/static/images/big/login-hero.jpg`), `accept-invite.$inviteId.tsx`,
+  `server/index.ts` (allowlist), `utils/env.ts`. Gated by
+  `ENABLE_GOOGLE_LOGIN` / `ENABLE_MICROSOFT_LOGIN` (off until set) AND the provider
+  must be enabled in the Supabase dashboard.
 
 When adding new BIG features, prefer **additive** files (new modules / routes /
 components) over editing upstream files, to keep upstream merges clean.

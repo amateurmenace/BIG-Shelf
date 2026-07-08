@@ -22,7 +22,6 @@ import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
-import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { assertActiveNeonMemberForSignup } from "~/modules/big-neon-auth/service.server";
 import { findUserByEmail } from "~/modules/user/service.server";
@@ -46,7 +45,7 @@ import { validateNonSSOSignup } from "~/utils/sso.server";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";
-  const subHeading = "Start your journey with Shelf";
+  const subHeading = "Start your journey with BIG Shelf";
   const { disableSignup } = config;
 
   try {
@@ -174,26 +173,50 @@ export default function Join() {
   /** Focus the email field on mount (intentional first-field focus on auth pages). */
   const emailInputRef = useAutoFocus<HTMLInputElement>();
 
+  /** Whether social sign-up (Google / Microsoft) is available. */
+  const hasSocial = googleLoginEnabled || microsoftLoginEnabled;
+
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full max-w-md">
-        <Form ref={zo.ref} method="post" className="space-y-6" replace>
-          <div>
-            <Input
-              ref={emailInputRef}
-              data-test-id="email"
-              label="Email address"
-              placeholder="zaans@huisje.com"
-              required
-              name={zo.fields.email()}
-              type="email"
-              autoComplete="email"
-              disabled={disabled}
-              inputClassName="w-full"
-              error={zo.errors.email()?.message || data?.error.message}
-            />
-          </div>
+        {/* Primary: sign up with a provider */}
+        {hasSocial ? (
+          <SocialLoginButtons
+            google={googleLoginEnabled}
+            microsoft={microsoftLoginEnabled}
+          />
+        ) : null}
 
+        {hasSocial ? (
+          <div className="my-6 flex items-center gap-3">
+            <span className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs font-medium uppercase tracking-wide text-gray-400">
+              or with email
+            </span>
+            <span className="h-px flex-1 bg-gray-200" />
+          </div>
+        ) : null}
+
+        {/* Secondary: email + password */}
+        <Form
+          ref={zo.ref}
+          method="post"
+          className="flex flex-col gap-3"
+          replace
+        >
+          <Input
+            ref={emailInputRef}
+            data-test-id="email"
+            label="Email"
+            placeholder="you@brooklineinteractive.org"
+            required
+            name={zo.fields.email()}
+            type="email"
+            autoComplete="email"
+            disabled={disabled}
+            inputClassName="w-full"
+            error={zo.errors.email()?.message || data?.error.message}
+          />
           <PasswordInput
             label="Password"
             placeholder="**********"
@@ -206,7 +229,7 @@ export default function Join() {
             error={zo.errors.password()?.message}
           />
           <PasswordInput
-            label="Confirm Password"
+            label="Confirm password"
             placeholder="**********"
             required
             data-test-id="confirmPassword"
@@ -216,55 +239,31 @@ export default function Join() {
             inputClassName="w-full"
             error={zo.errors.confirmPassword()?.message}
           />
-
           <input
             type="hidden"
             name={zo.fields.redirectTo()}
             value={redirectTo}
           />
           <Button
-            className="text-center"
             type="submit"
             data-test-id="login"
-            disabled={disabled}
             width="full"
+            disabled={disabled}
           >
-            Get Started
+            Create account
           </Button>
         </Form>
-        {/* BIG: Google/Microsoft social login (sign in + sign up). */}
-        <SocialLoginButtons
-          google={googleLoginEnabled}
-          microsoft={microsoftLoginEnabled}
-        />
-        <div className="mt-6">
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-300" />
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="bg-white px-2 text-gray-500">
-                {"Or use a One Time Password"}
-              </span>
-            </div>
-          </div>
-          <div className="mt-6">
-            <ContinueWithEmailForm mode="signup" />
-          </div>
-        </div>
-        <div className="flex items-center justify-center pt-5">
-          <div className="text-center text-sm text-gray-500">
-            {"Already have an account? "}
-            <Button
-              variant="link"
-              to={{
-                pathname: "/",
-                search: searchParams.toString(),
-              }}
-            >
-              Log in
-            </Button>
-          </div>
+
+        {/* Log in — a prominent action, not a buried link */}
+        <div className="mt-8 rounded-lg border border-gray-200 bg-gray-50 p-4 text-center">
+          <p className="mb-3 text-sm text-gray-600">Already have an account?</p>
+          <Button
+            variant="secondary"
+            width="full"
+            to={{ pathname: "/", search: searchParams.toString() }}
+          >
+            Log in
+          </Button>
         </div>
       </div>
     </div>
