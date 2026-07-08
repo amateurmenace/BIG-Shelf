@@ -52,6 +52,8 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       DISABLE_SIGNUP: string;
       DISABLE_SSO: string;
+      ENABLE_GOOGLE_LOGIN: string;
+      ENABLE_MICROSOFT_LOGIN: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
@@ -353,6 +355,20 @@ export const DISABLE_SIGNUP =
 
 export const DISABLE_SSO =
   getEnv("DISABLE_SSO", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+/** BIG: enable "Continue with Google" social login (needs Google enabled in Supabase). */
+export const ENABLE_GOOGLE_LOGIN =
+  getEnv("ENABLE_GOOGLE_LOGIN", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+/** BIG: enable "Continue with Microsoft" social login (needs Azure enabled in Supabase). */
+export const ENABLE_MICROSOFT_LOGIN =
+  getEnv("ENABLE_MICROSOFT_LOGIN", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;

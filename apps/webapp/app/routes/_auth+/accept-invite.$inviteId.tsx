@@ -8,6 +8,8 @@ import {
   useLoaderData,
 } from "react-router";
 import { z } from "zod";
+import Input from "~/components/forms/input";
+import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
@@ -22,7 +24,12 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { INVITE_TOKEN_SECRET, SUPPORT_EMAIL } from "~/utils/env";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import {
+  isZodValidationError,
+  makeShelfError,
+  ShelfError,
+} from "~/utils/error";
+import { getValidationErrors } from "~/utils/http";
 import {
   payload,
   error,
@@ -80,9 +87,21 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
       });
     }
 
+    // BIG: a brand-new invitee (unauthenticated, no existing account) gets a
+    // "create your password" form so they set a real password up front — instead
+    // of being silently provisioned with a random one they never see (which left
+    // them unable to log in later and hunting for the tiny "Sign up" link).
+    const existingUser = await db.user.findFirst({
+      where: { email: invite.inviteeEmail },
+      select: { id: true },
+    });
+    const needsPassword = !context.isAuthenticated && !existingUser;
+
     return payload({
       inviter: resolveUserDisplayName(invite.inviter),
       workspace: `${invite.organization.name}`,
+      inviteeEmail: invite.inviteeEmail,
+      needsPassword,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -97,11 +116,36 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
 
 export const meta = () => [{ title: appendToMetaTitle("Accept team invite") }];
 
+/**
+ * Accept-invite form data. `token` always comes from the invite link.
+ * `password`/`confirmPassword` are present only on the new-invitee "create your
+ * password" path; when absent (authenticated / already-registered user) a random
+ * password is used and never surfaced.
+ */
+const AcceptInviteSchema = z
+  .object({
+    token: z.string(),
+    password: z
+      .string()
+      .min(8, "Your password is too short. Min 8 characters are required.")
+      .optional(),
+    confirmPassword: z.string().optional(),
+  })
+  .superRefine(({ password, confirmPassword }, ctx) => {
+    if (password && password !== confirmPassword) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Password and confirm password must match",
+        path: ["confirmPassword"],
+      });
+    }
+  });
+
 export async function action({ context, request }: LoaderFunctionArgs) {
   try {
-    const { token } = parseData(
+    const { token, password: chosenPassword } = parseData(
       await request.formData(),
-      z.object({ token: z.string() }),
+      AcceptInviteSchema,
       {
         message:
           "The invitation link doesn't have a token provided. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support",
@@ -111,7 +155,10 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
       id: string;
     };
-    const password = generateRandomCode(10);
+    // BIG: use the invitee's chosen password (new-user path) so they can log in
+    // afterwards; otherwise a random one (authenticated / already-registered
+    // path, where createUserOrAttachOrg ignores it).
+    const password = chosenPassword || generateRandomCode(10);
     const updatedInvite = await updateInviteStatus({
       id: decodedInvite.id,
       status: InviteStatuses.ACCEPTED,
@@ -170,7 +217,11 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       }
     );
   } catch (cause) {
-    const reason = makeShelfError(cause);
+    const reason = makeShelfError(
+      cause,
+      undefined,
+      isZodValidationError(cause)
+    );
     let titleOverride = null;
     if (cause instanceof Error && cause.name === "JsonWebTokenError") {
       titleOverride = "Invalid invite token";
@@ -205,11 +256,16 @@ function splitIntoStableLines(message: string) {
 }
 
 export default function AcceptInvite() {
-  const { inviter, workspace } = useLoaderData<typeof loader>();
+  const { inviter, workspace, inviteeEmail, needsPassword } =
+    useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const disabled = useDisabled();
   const actionData = useActionData<typeof action>();
   const error = actionData?.error;
+  /** Server-side validation fallback (client validation can be bypassed). */
+  const validationErrors = getValidationErrors<typeof AcceptInviteSchema>(
+    actionData?.error
+  );
   return (
     <>
       <div className=" flex flex-col items-center text-center">
@@ -232,6 +288,52 @@ export default function AcceptInvite() {
             <Button to="/" variant={"secondary"}>
               Back to home
             </Button>
+          </div>
+        ) : needsPassword ? (
+          <div className="w-full text-left">
+            <h2 className="text-center">Accept your invite</h2>
+            <p className="mb-5 mt-2 text-center text-gray-600">
+              <strong>{inviter}</strong> invited you to join{" "}
+              <strong>{workspace}’s</strong> workspace. Create a password to
+              finish setting up your account.
+            </p>
+            <Form method="post" className="space-y-4">
+              <input
+                type="hidden"
+                name="token"
+                value={searchParams.get("token") || ""}
+              />
+              <Input
+                label="Email"
+                name="email"
+                defaultValue={inviteeEmail}
+                disabled
+                inputClassName="w-full"
+              />
+              <PasswordInput
+                label="Create a password"
+                name="password"
+                required
+                autoComplete="new-password"
+                placeholder="**********"
+                inputClassName="w-full"
+                error={validationErrors?.password?.message}
+              />
+              <PasswordInput
+                label="Confirm password"
+                name="confirmPassword"
+                required
+                autoComplete="new-password"
+                placeholder="**********"
+                inputClassName="w-full"
+                error={validationErrors?.confirmPassword?.message}
+              />
+              <Button type="submit" width="full" disabled={disabled}>
+                {disabled
+                  ? "Creating your account..."
+                  : "Create account & join"}
+              </Button>
+            </Form>
           </div>
         ) : (
           <div>

@@ -3,10 +3,17 @@ import type {
   ActionFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { redirect, data, useActionData, useNavigation } from "react-router";
+import {
+  redirect,
+  data,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "react-router";
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { SocialLoginButtons } from "~/components/big/social-login-buttons";
 import { Form } from "~/components/custom-form";
 
 import Input from "~/components/forms/input";
@@ -20,6 +27,7 @@ import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { assertActiveNeonMemberForSignup } from "~/modules/big-neon-auth/service.server";
 import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { ENABLE_GOOGLE_LOGIN, ENABLE_MICROSOFT_LOGIN } from "~/utils/env";
 import {
   ShelfError,
   isZodValidationError,
@@ -58,7 +66,14 @@ export function loader({ context }: LoaderFunctionArgs) {
       return redirect("/home");
     }
 
-    return data(payload({ title, subHeading }));
+    return data(
+      payload({
+        title,
+        subHeading,
+        googleLoginEnabled: ENABLE_GOOGLE_LOGIN,
+        microsoftLoginEnabled: ENABLE_MICROSOFT_LOGIN,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
@@ -153,6 +168,8 @@ export default function Join() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const data = useActionData<typeof action>();
+  const { googleLoginEnabled, microsoftLoginEnabled } =
+    useLoaderData<typeof loader>();
 
   /** Focus the email field on mount (intentional first-field focus on auth pages). */
   const emailInputRef = useAutoFocus<HTMLInputElement>();
@@ -215,6 +232,11 @@ export default function Join() {
             Get Started
           </Button>
         </Form>
+        {/* BIG: Google/Microsoft social login (sign in + sign up). */}
+        <SocialLoginButtons
+          google={googleLoginEnabled}
+          microsoft={microsoftLoginEnabled}
+        />
         <div className="mt-6">
           <div className="relative">
             <div className="absolute inset-0 flex items-center">

@@ -180,6 +180,8 @@ export default createHonoServer<ServerEnv>({
           "/oauth/callback/mobile", // Native-app SSO callback (web-delegated)
           "/neon-login", // BIG: "Log in with Neon" — initiate
           "/neon/callback", // BIG: "Log in with Neon" — callback
+          "/oauth/social/*path", // BIG: Google/Microsoft social login — initiate
+          "/oauth/social-callback", // BIG: Google/Microsoft social login — callback
           "/logout",
           "/otp",
           "/resend-otp",

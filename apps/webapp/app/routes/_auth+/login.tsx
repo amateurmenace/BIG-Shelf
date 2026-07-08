@@ -13,6 +13,7 @@ import {
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { SocialLoginButtons } from "~/components/big/social-login-buttons";
 import { Form } from "~/components/custom-form";
 
 import Input from "~/components/forms/input";
@@ -31,6 +32,7 @@ import {
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { ENABLE_GOOGLE_LOGIN, ENABLE_MICROSOFT_LOGIN } from "~/utils/env";
 import {
   ShelfError,
   isLikeShelfError,
@@ -65,6 +67,8 @@ export function loader({ context }: LoaderFunctionArgs) {
       disableSignup,
       disableSSO,
       neonLoginEnabled: isNeonOAuthConfigured(),
+      googleLoginEnabled: ENABLE_GOOGLE_LOGIN,
+      microsoftLoginEnabled: ENABLE_MICROSOFT_LOGIN,
     })
   );
 }
@@ -179,8 +183,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
-  const { disableSignup, disableSSO, neonLoginEnabled } =
-    useLoaderData<typeof loader>();
+  const {
+    disableSignup,
+    disableSSO,
+    neonLoginEnabled,
+    googleLoginEnabled,
+    microsoftLoginEnabled,
+  } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -259,6 +268,11 @@ export default function IndexLoginForm() {
           </div>
         </div>
       </Form>
+      {/* BIG: Google/Microsoft social login (sign in + sign up). */}
+      <SocialLoginButtons
+        google={googleLoginEnabled}
+        microsoft={microsoftLoginEnabled}
+      />
       {!disableSSO && (
         <div className="mt-6 text-center">
           <Button variant="link" to="/sso-login">
