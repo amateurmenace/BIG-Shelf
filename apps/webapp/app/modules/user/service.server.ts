@@ -743,6 +743,12 @@ export async function createUser(
               onboarded: true,
               sso: true,
             }),
+            // BIG: invitees choose a real password on the accept-invite page and
+            // their name is derived from the invite's team-member record, so —
+            // exactly like the SSO users above — they are already fully
+            // provisioned. Mark them onboarded so they skip the /onboarding
+            // screen, which would otherwise re-ask for a password and their name.
+            ...(createdWithInvite && { onboarded: true }),
           },
           select: {
             ...USER_WITH_SSO_DETAILS_SELECT,

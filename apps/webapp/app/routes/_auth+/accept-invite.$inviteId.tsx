@@ -155,6 +155,40 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
       id: string;
     };
+
+    // BIG: a brand-new invitee MUST set a real password here — they're now
+    // provisioned as `onboarded` and never prompted again, so a submit that
+    // slipped past the form's `required` (JS disabled / crafted request) would
+    // otherwise be given an unknowable random password and be locked out. Mirror
+    // the loader's `needsPassword` check server-side and reject before we
+    // provision anything. Only runs on the rare no-password submit.
+    if (!context.isAuthenticated && !chosenPassword) {
+      const invite = await db.invite.findFirst({
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pre-org invite-acceptance flow; the invite id comes from the JWT-verified token above and the viewer is not yet a member of any org, so there is no caller organizationId to scope by — this only reads inviteeEmail to decide whether a password is required (mirrors the loader's own invite lookup)
+        where: { id: decodedInvite.id },
+        select: { inviteeEmail: true },
+      });
+      const alreadyRegistered = invite
+        ? Boolean(
+            await db.user.findFirst({
+              where: { email: invite.inviteeEmail },
+              select: { id: true },
+            })
+          )
+        : true; // no invite found → let updateInviteStatus surface the real error
+      if (!alreadyRegistered) {
+        throw new ShelfError({
+          cause: null,
+          title: "Password required",
+          message:
+            "Please choose a password to finish setting up your account, then try again.",
+          label: "Invite",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+    }
+
     // BIG: use the invitee's chosen password (new-user path) so they can log in
     // afterwards; otherwise a random one (authenticated / already-registered
     // path, where createUserOrAttachOrg ignores it).
@@ -204,18 +238,18 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     // Commit the session
     context.setSession(authSession);
 
-    return redirect(
-      safeRedirect(
-        `/onboarding?organizationId=${updatedInvite.organizationId}`
-      ),
-      {
-        headers: [
-          setCookie(
-            await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
-          ),
-        ],
-      }
-    );
+    // BIG: a brand-new invitee is now fully provisioned (real password + name)
+    // and marked onboarded in createUser, so send them straight to /home. Going
+    // via /onboarding would only redirect back to /home (onboarded guard) after
+    // pointlessly re-asking for a password and their name. /home routes members
+    // to /reserve and everyone else to their dashboard.
+    return redirect(safeRedirect(`/home`), {
+      headers: [
+        setCookie(
+          await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
+        ),
+      ],
+    });
   } catch (cause) {
     const reason = makeShelfError(
       cause,
