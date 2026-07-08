@@ -29,6 +29,12 @@ interface ValidateBookingOwnershipParams {
  * Authorization rules:
  * - BASE users: Blocked for write operations, ownership-checked for read operations
  * - SELF_SERVICE users: Only allowed on bookings they own (creator OR custodian)
+ * - MEMBER users: Same as SELF_SERVICE — only allowed on bookings they own.
+ *   BIG customization: the MEMBER role mirrors SELF_SERVICE. Before this guard
+ *   included MEMBER, a member fell through to the ADMIN/OWNER "implicitly
+ *   allowed" path and could act on ANY booking in the org (delete, extend,
+ *   download PDF/ICS) — a cross-user authorization gap. Keeping MEMBER in the
+ *   ownership branch closes it.
  * - ADMIN/OWNER users: Allowed on all bookings
  *
  * @throws {ShelfError} 403 if user is not authorized
@@ -53,6 +59,9 @@ export function validateBookingOwnership({
 
   if (
     role === OrganizationRoles.SELF_SERVICE ||
+    // BIG: MEMBER mirrors SELF_SERVICE — it must be ownership-checked, not
+    // treated like ADMIN/OWNER. See the JSDoc above for the gap this closes.
+    role === OrganizationRoles.MEMBER ||
     role === OrganizationRoles.BASE
   ) {
     const isBookingOwner = checkCustodianOnly
