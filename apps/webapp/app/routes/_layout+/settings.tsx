@@ -63,6 +63,8 @@ export default function SettingsPage() {
     ...(!_isPersonalOrg ? [{ to: "emails", content: "Emails" }] : []),
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
+    // BIG: bulk member sync from Neon CRM (admin-only, org-scoped).
+    ...(!_isPersonalOrg ? [{ to: "member-sync", content: "Member sync" }] : []),
   ];
 
   const { isBaseOrSelfService } = useUserRoleHelper();
@@ -70,9 +72,14 @@ export default function SettingsPage() {
   if (isBaseOrSelfService) {
     items = items.filter(
       (item) =>
-        !["custom-fields", "team", "general", "bookings", "emails"].includes(
-          item.to
-        )
+        ![
+          "custom-fields",
+          "team",
+          "general",
+          "bookings",
+          "emails",
+          "member-sync",
+        ].includes(item.to)
     );
   }
 

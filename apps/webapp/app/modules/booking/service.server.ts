@@ -30,6 +30,7 @@ import {
   getActiveTemplate,
   hasSignedForBooking,
 } from "~/modules/big-loan-agreement/service.server";
+import { notifyWaitlistForFreedAssets } from "~/modules/big-waitlist/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
@@ -2111,6 +2112,24 @@ export async function checkinBooking({
       });
     }
 
+    // BIG: the returned assets are now available — notify any waitlisters.
+    // Best-effort; a waitlist notification must never break check-in.
+    if (assetsToCheckin.length > 0) {
+      void notifyWaitlistForFreedAssets({
+        organizationId,
+        assetIds: assetsToCheckin,
+      }).catch((notifyCause) =>
+        Logger.error(
+          new ShelfError({
+            cause: notifyCause,
+            message: "Failed to notify waitlist after check-in",
+            additionalData: { bookingId: id },
+            label,
+          })
+        )
+      );
+    }
+
     return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
@@ -3868,6 +3887,25 @@ export async function cancelBooking({
       meta: cancellationReason ? { cancellationReason } : undefined,
     });
 
+    // BIG: if cancelling returned assets to available, notify waitlisters.
+    // Best-effort; must never break the cancel. RESERVED bookings never held
+    // the assets, so nothing freed there.
+    if (bookingFound.status !== BookingStatus.RESERVED) {
+      void notifyWaitlistForFreedAssets({
+        organizationId,
+        assetIds: bookingFound.assets.map((a) => a.id),
+      }).catch((notifyCause) =>
+        Logger.error(
+          new ShelfError({
+            cause: notifyCause,
+            message: "Failed to notify waitlist after booking cancel",
+            additionalData: { bookingId: bookingFound.id },
+            label,
+          })
+        )
+      );
+    }
+
     return booking;
   } catch (cause) {
     throw new ShelfError({
@@ -4859,6 +4897,22 @@ export async function deleteBooking(
     /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
     if (activeBooking) {
       await updateBookingAssetStates(activeBooking, AssetStatus.AVAILABLE);
+
+      // BIG: these assets just became available — notify any waitlisters.
+      // Best-effort; must never break the delete.
+      void notifyWaitlistForFreedAssets({
+        organizationId,
+        assetIds: activeBooking.assets.map((a) => a.id),
+      }).catch((notifyCause) =>
+        Logger.error(
+          new ShelfError({
+            cause: notifyCause,
+            message: "Failed to notify waitlist after booking delete",
+            additionalData: { bookingId: b.id },
+            label,
+          })
+        )
+      );
 
       // If booking has some kits, then make them available too
       if (hasKits) {

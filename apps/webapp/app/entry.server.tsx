@@ -11,6 +11,7 @@ import { registerEmailWorkers } from "./emails/email.worker.server";
 import { registerAddonTrialWorkers } from "./modules/addon-trial/worker.server";
 import { regierAssetWorkers } from "./modules/asset-reminder/worker.server";
 import { registerAuditWorkers } from "./modules/audit/worker.server";
+import { registerBigReminderWorkers } from "./modules/big-reminder/worker.server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
@@ -75,6 +76,19 @@ schedulerService
               cause,
               message:
                 "Something went wrong while registering addon trial workers.",
+              label: "Scheduler",
+            })
+          );
+        }),
+      // BIG: automated day-ahead + overdue booking reminders (self-rescheduling).
+      registerBigReminderWorkers()
+        .then(() => console.log("BIG reminder workers registered"))
+        .catch((cause) => {
+          Logger.error(
+            new ShelfError({
+              cause,
+              message:
+                "Something went wrong while registering BIG reminder workers.",
               label: "Scheduler",
             })
           );

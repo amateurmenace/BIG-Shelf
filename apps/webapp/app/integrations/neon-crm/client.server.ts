@@ -237,6 +237,29 @@ function toStringOrNull(value: unknown): string | null {
 }
 
 /**
+ * Maps one `/accounts/search` result row to a {@link NeonMember}. Shared by the
+ * single-email lookup and the bulk list so field parsing stays in one place.
+ *
+ * @param row - A raw `searchResults[i]` object keyed by output-field labels
+ * @returns The member, or `null` when the row has no usable Account ID
+ */
+function mapMemberSearchRow(row: Record<string, unknown>): NeonMember | null {
+  const accountId = toStringOrNull(row["Account ID"]);
+  if (!accountId) {
+    return null;
+  }
+  return {
+    neonAccountId: accountId,
+    firstName: toStringOrNull(row["First Name"]),
+    lastName: toStringOrNull(row["Last Name"]),
+    email: toStringOrNull(row["Email 1"]),
+    isActiveMember:
+      toStringOrNull(row["Account Current Membership Status"]) ===
+      NEON_ACTIVE_MEMBERSHIP_STATUS,
+  };
+}
+
+/**
  * Resolves a {@link NeonMember} from an email address in a single search call.
  * Used to gate email/password self-signup on a real, active membership.
  *
@@ -263,20 +286,13 @@ export async function resolveNeonMemberByEmail(
     });
 
     const row = result?.searchResults?.[0];
-    const accountId = toStringOrNull(row?.["Account ID"]);
-    if (!row || !accountId) {
+    const member = row ? mapMemberSearchRow(row) : null;
+    if (!member) {
       return null;
     }
 
-    return {
-      neonAccountId: accountId,
-      firstName: toStringOrNull(row["First Name"]),
-      lastName: toStringOrNull(row["Last Name"]),
-      email: toStringOrNull(row["Email 1"]) ?? email.trim(),
-      isActiveMember:
-        toStringOrNull(row["Account Current Membership Status"]) ===
-        NEON_ACTIVE_MEMBERSHIP_STATUS,
-    };
+    // Fall back to the queried email if Neon's "Email 1" output is blank.
+    return { ...member, email: member.email ?? email.trim() };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -328,6 +344,75 @@ export async function resolveNeonMemberByAccountId(
       cause,
       message: "Could not load the Neon account",
       additionalData: { accountId },
+      label,
+    });
+  }
+}
+
+/**
+ * Lists ALL active Neon members by paging through `/accounts/search` filtered on
+ * `Account Current Membership Status = "Active"`. Powers the admin "Sync now"
+ * bulk pull that provisions/refreshes member logins from Neon.
+ *
+ * De-duplicates by Neon Account ID and only returns members that have an email
+ * (the key we provision shelf users on).
+ *
+ * @param options.pageSize - Results per page (default 100)
+ * @param options.maxPages - Safety cap on pages fetched (default 100 → 10k members)
+ * @returns Every active member Neon returns
+ * @throws {ShelfError} If the API is not configured or a request fails
+ */
+export async function listActiveNeonMembers(options?: {
+  pageSize?: number;
+  maxPages?: number;
+}): Promise<NeonMember[]> {
+  const pageSize = options?.pageSize ?? 100;
+  const maxPages = options?.maxPages ?? 100;
+
+  try {
+    // Keyed by account id so duplicate rows across pages collapse.
+    const byAccountId = new Map<string, NeonMember>();
+
+    for (let currentPage = 0; currentPage < maxPages; currentPage++) {
+      const result = await neonApiFetch<{
+        pagination?: { totalPages?: number; totalResults?: number };
+        searchResults?: Array<Record<string, unknown>>;
+      }>("/accounts/search", {
+        method: "POST",
+        body: JSON.stringify({
+          searchFields: [
+            {
+              field: "Account Current Membership Status",
+              operator: "EQUAL",
+              value: NEON_ACTIVE_MEMBERSHIP_STATUS,
+            },
+          ],
+          outputFields: MEMBER_OUTPUT_FIELDS,
+          pagination: { currentPage, pageSize },
+        }),
+      });
+
+      const rows = result?.searchResults ?? [];
+      for (const row of rows) {
+        const member = mapMemberSearchRow(row);
+        // Keep only genuinely-active members we can key on by email.
+        if (member?.isActiveMember && member.email) {
+          byAccountId.set(member.neonAccountId, member);
+        }
+      }
+
+      const totalPages = result?.pagination?.totalPages ?? 0;
+      // Stop when the page came back short or we've covered all pages.
+      if (rows.length < pageSize || currentPage + 1 >= totalPages) {
+        break;
+      }
+    }
+
+    return [...byAccountId.values()];
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Could not list active Neon members",
       label,
     });
   }

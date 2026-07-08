@@ -2112,3 +2112,67 @@ model AssetConditionImage {
   @@index([conditionLogId])
   @@index([organizationId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BIG: Equipment waitlists
+// Additive-only — plain FK columns to Asset/User/Organization (no relations on
+// those upstream models). A member joins the waitlist for an asset that is
+// unavailable for their desired window; when the asset frees up (a booking is
+// cancelled / checked in / deleted), the earliest waiting member is emailed.
+// App-layer org-scoping. See app/modules/big-waitlist/.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum WaitlistStatus {
+  WAITING // active — waiting for the asset to free up
+  NOTIFIED // the asset freed up and the member was emailed
+  FULFILLED // resolved (e.g. the member booked it)
+  CANCELLED // the member left the waitlist
+}
+
+/// A member's standing request to be emailed when a specific asset becomes
+/// available for a desired window. Additive, plain-FK, org-scoped in the app.
+model Waitlist {
+  id                String         @id @default(cuid())
+  organizationId    String
+  assetId           String
+  requestedByUserId String
+  from              DateTime       @db.Timestamptz(3) // desired window start
+  to                DateTime       @db.Timestamptz(3) // desired window end
+  status            WaitlistStatus @default(WAITING)
+  notifiedAt        DateTime? // set when the "now available" email is sent
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([assetId])
+  @@index([assetId, status])
+  @@index([organizationId])
+  @@index([requestedByUserId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BIG: Booking reminder log (dedup for the additive reminder sweeper)
+// Additive-only. One row per reminder actually emailed, so the self-rescheduling
+// sweeper (app/modules/big-reminder/) never sends the same reminder twice.
+// Plain-FK, org-scoped in the app.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum BookingReminderType {
+  PICKUP // reservation starts soon
+  RETURN // reservation is due back soon
+  OVERDUE // reservation is past due (re-arms daily)
+}
+
+/// Records that a given reminder type was emailed for a booking. The sweeper
+/// checks this before sending: PICKUP/RETURN are at-most-once; OVERDUE re-sends
+/// only when the newest OVERDUE row for the booking is older than ~a day.
+model BookingReminderLog {
+  id             String              @id @default(cuid())
+  organizationId String
+  bookingId      String
+  type           BookingReminderType
+  sentAt         DateTime            @default(now())
+
+  @@index([bookingId])
+  @@index([bookingId, type])
+  @@index([organizationId])
+}
