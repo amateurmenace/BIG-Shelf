@@ -274,6 +274,8 @@ export async function updateOrganization({
     selfServiceGroupId: string | null;
     adminGroupId: string | null;
     baseUserGroupId: string | null;
+    // BIG: MEMBER role group mapping (mirrors selfServiceGroupId).
+    memberGroupId: string | null;
   };
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];
   qrIdDisplayPreference?: Organization["qrIdDisplayPreference"];

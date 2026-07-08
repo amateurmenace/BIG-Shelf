@@ -22,6 +22,7 @@ export const USER_WITH_SSO_DETAILS_SELECT = {
               baseUserGroupId: true,
               selfServiceGroupId: true,
               adminGroupId: true,
+              memberGroupId: true,
             },
           },
         },

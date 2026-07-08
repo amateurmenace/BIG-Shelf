@@ -1,9 +1,10 @@
+import { OrganizationRoles } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { data, Link, useLoaderData } from "react-router";
+import { data, Link, redirect, useLoaderData } from "react-router";
 import AnnouncementBar from "~/components/dashboard/announcement-bar";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";
 import OnboardingChecklist from "~/components/dashboard/checklist";
@@ -22,6 +23,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { getUpcomingRemindersForHomePage } from "~/modules/asset-reminder/service.server";
+import { getCurrentOrganizationRole } from "~/modules/big-member/service.server";
 import { getBookings } from "~/modules/booking/service.server";
 
 import styles from "~/styles/layout/skeleton-loading.css?url";
@@ -336,6 +338,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
     });
   } catch (cause) {
+    // BIG: MEMBER (like BASE / SELF_SERVICE) lacks `dashboard:read`, so
+    // requirePermission 403s them on the app's default landing (/home). Route
+    // members to their reservation portal instead of a dead-end 403. The role
+    // is resolved only here on the error path, so admins/owners — who pass
+    // requirePermission and never reach this catch — pay no extra lookup.
+    const role = await getCurrentOrganizationRole({ userId, request }).catch(
+      () => null
+    );
+    if (role === OrganizationRoles.MEMBER) {
+      throw redirect("/reserve");
+    }
+
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
   }

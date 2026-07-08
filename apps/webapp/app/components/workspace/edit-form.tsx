@@ -491,6 +491,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
       selfServiceGroupId: z.string().optional(),
       baseUserGroupId: z.string().optional(),
       adminGroupId: z.string().optional(),
+      memberGroupId: z.string().optional(),
     })
     .superRefine((data, ctx) => {
       if (!sso) return;
@@ -499,6 +500,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
         data.adminGroupId,
         data.selfServiceGroupId,
         data.baseUserGroupId,
+        data.memberGroupId,
       ].some((value) => value != null && value.trim().length > 0);
 
       if (!hasAtLeastOneGroup) {
@@ -621,6 +623,30 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
             defaultValue={
               organization.ssoDetails.selfServiceGroupId || undefined
             }
+            className="w-full"
+          />
+        </FormRow>
+
+        {/* BIG: MEMBER role group mapping (mirrors Self service). */}
+        <FormRow
+          rowLabel={`Member role group`}
+          subHeading={
+            <div>
+              The group identifier that should be mapped to the <b>Member</b>{" "}
+              role.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+        >
+          <Input
+            label={"Member role group"}
+            hideLabel
+            name={zo.fields.memberGroupId()}
+            error={
+              validationErrors?.memberGroupId?.message ||
+              zo.errors.memberGroupId()?.message
+            }
+            defaultValue={organization.ssoDetails.memberGroupId || undefined}
             className="w-full"
           />
         </FormRow>

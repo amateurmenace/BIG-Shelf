@@ -76,6 +76,11 @@ declare global {
       COOKIE_DOMAIN: string;
       POSTHOG_API_KEY: string;
       POSTHOG_HOST: string;
+      NEON_ORG_ID: string;
+      NEON_API_KEY: string;
+      NEON_OAUTH_CLIENT_ID: string;
+      NEON_OAUTH_CLIENT_SECRET: string;
+      NEON_MEMBER_ORG_ID: string;
     }
   }
 }
@@ -229,6 +234,35 @@ export const POSTHOG_API_KEY = getEnv("POSTHOG_API_KEY", {
 });
 export const POSTHOG_HOST = getEnv("POSTHOG_HOST", {
   isSecret: true,
+  isRequired: false,
+});
+
+/**
+ * Neon CRM (member identity source of truth). All optional — when unset the
+ * Neon login/verification paths report "not configured" and degrade gracefully
+ * (see ~/integrations/neon-crm/client.server). The API creds (Org ID + API key)
+ * and the constituent-OAuth creds (client id + secret) are independent.
+ * NEON_MEMBER_ORG_ID is the shelf organization id that new Neon-verified members
+ * are attached to (BIG's Team workspace).
+ */
+export const NEON_ORG_ID = getEnv("NEON_ORG_ID", {
+  isSecret: true,
+  isRequired: false,
+});
+export const NEON_API_KEY = getEnv("NEON_API_KEY", {
+  isSecret: true,
+  isRequired: false,
+});
+export const NEON_OAUTH_CLIENT_ID = getEnv("NEON_OAUTH_CLIENT_ID", {
+  isSecret: true,
+  isRequired: false,
+});
+export const NEON_OAUTH_CLIENT_SECRET = getEnv("NEON_OAUTH_CLIENT_SECRET", {
+  isSecret: true,
+  isRequired: false,
+});
+export const NEON_MEMBER_ORG_ID = getEnv("NEON_MEMBER_ORG_ID", {
+  isSecret: false,
   isRequired: false,
 });
 

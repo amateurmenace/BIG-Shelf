@@ -84,10 +84,40 @@ of upstream's changes.
   - _Core edits (conflict-prone):_ the `OrganizationRoles` enum + `Room`
     permission entity in `permission.data.ts`; `roles.ts` + `roles.server.ts`;
     the invite / change-role dialogs; `settings.team.tsx`; the SSO group mapping.
+- **Member self-service portal** (shipped 2026-07) — the MEMBER landing page
+  (`/reserve`): a browse-and-reserve equipment catalog, the member's own
+  reservations, and a room-availability calendar (FullCalendar month/week).
+  - _Additive:_ `app/modules/big-member/`, `app/routes/_layout+/reserve.tsx`.
+  - _Core edits:_ the `home.tsx` MEMBER→`/reserve` redirect; the sidebar nav hook.
+- **Neon CRM integration + multi-path auth** (shipped 2026-07) — members are
+  provisioned from Neon CRM (the source of truth) via Neon OAuth, Neon-gated
+  email/password, or SSO→Member.
+  - _Additive:_ `app/integrations/neon-crm/`, `app/modules/big-neon-auth/`,
+    `app/routes/_auth+/neon-*`.
+  - _Core edits:_ `login.tsx`, `join.tsx`, `send-otp.tsx`, `otp.tsx`;
+    `server/index.ts` (public-route allowlist); the user service; `utils/env.ts`.
+- **Digital loan agreements** (shipped 2026-07) — a per-checkout e-signed
+  agreement placing liability on the borrower.
+  - _Additive:_ `app/modules/big-loan-agreement/`,
+    `app/routes/_layout+/loan-agreement.$bookingId.tsx`.
+  - _Core edits:_ the checkout gate in `app/modules/booking/service.server.ts`.
+- **Asset condition & maintenance tracking** (shipped 2026-07) — a dated,
+  photo-supported condition log per asset.
+  - _Additive:_ `app/modules/big-asset-condition/`,
+    `app/routes/_layout+/assets.$assetId.condition.tsx`.
+  - _Core edits:_ the tab registration in `assets.$assetId.tsx`.
+
+> **RLS:** every BIG additive table (`Room`, `LoanAgreementTemplate` /
+> `LoanAgreementSignature`, `AssetConditionLog` / `AssetConditionImage`, …) must
+> `ENABLE ROW LEVEL SECURITY` in its migration — shelf enables RLS _outside_
+> migrations, so Prisma-created tables otherwise trip Supabase's
+> `rls_disabled_in_public` critical alert. No policies = deny-all for anon; the
+> app reads via Prisma as table owner and is unaffected.
 
 **Not built yet (deferred):** for Rooms — QR codes, custody, scanner check-in/out,
 bulk actions, mobile API, CSV import. For Member — the mobile **companion** app
-(owned by another team) and the admin **update-targeting** checkbox.
+(owned by another team) and the admin **update-targeting** checkbox. Also
+deferred: Neon "Sync now" bulk pull, automated reminders + waitlists.
 
 ---
 

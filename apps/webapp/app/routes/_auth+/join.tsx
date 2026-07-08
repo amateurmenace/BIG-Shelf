@@ -17,6 +17,7 @@ import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
+import { assertActiveNeonMemberForSignup } from "~/modules/big-neon-auth/service.server";
 import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -103,6 +104,8 @@ export async function action({ request }: ActionFunctionArgs) {
         );
         // Block signup if domain uses SSO
         await validateNonSSOSignup(email);
+        // BIG: self-signup requires an active Neon membership.
+        await assertActiveNeonMemberForSignup(email);
 
         const existingUser = await findUserByEmail(email);
 

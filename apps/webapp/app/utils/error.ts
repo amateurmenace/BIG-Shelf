@@ -105,7 +105,11 @@ export type FailureReason = {
     | "Audit"
     | "Activity"
     | "Update"
-    | "Analytics";
+    | "Analytics"
+    | "Neon CRM" // Neon CRM integration client
+    | "Neon Auth" // "Log in with Neon" / Neon-gated signup
+    | "Loan Agreement" // BIG digital loan agreements
+    | "Asset Condition"; // BIG condition/maintenance log
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html

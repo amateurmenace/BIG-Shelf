@@ -26,6 +26,10 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
+import {
+  getActiveTemplate,
+  hasSignedForBooking,
+} from "~/modules/big-loan-agreement/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
@@ -1435,6 +1439,28 @@ export async function checkoutBooking({
         assetIds: bookingFound.assets.map((a) => a.id),
         organizationId,
       });
+    }
+
+    // BIG: per-checkout loan agreement gate. When this workspace has an active
+    // loan agreement, the booking must be signed before it can be checked out.
+    // No template configured → no-op (agreements are opt-in per workspace).
+    const agreementTemplate = await getActiveTemplate(organizationId);
+    if (agreementTemplate) {
+      const agreementSigned = await hasSignedForBooking({
+        bookingId: id,
+        organizationId,
+      });
+      if (!agreementSigned) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message:
+            "The loan agreement must be signed before this reservation can be checked out.",
+          status: 403,
+          shouldBeCaptured: false,
+          additionalData: { bookingId: id },
+        });
+      }
     }
 
     /** Server-side conflict validation to prevent race conditions */

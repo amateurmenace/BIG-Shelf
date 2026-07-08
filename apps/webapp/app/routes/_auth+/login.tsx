@@ -21,6 +21,7 @@ import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { isNeonOAuthConfigured } from "~/integrations/neon-crm/client.server";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 
@@ -57,7 +58,15 @@ export function loader({ context }: LoaderFunctionArgs) {
     return redirect("/home");
   }
 
-  return data(payload({ title, subHeading, disableSignup, disableSSO }));
+  return data(
+    payload({
+      title,
+      subHeading,
+      disableSignup,
+      disableSSO,
+      neonLoginEnabled: isNeonOAuthConfigured(),
+    })
+  );
 }
 
 const LoginFormSchema = z.object({
@@ -170,7 +179,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
-  const { disableSignup, disableSSO } = useLoaderData<typeof loader>();
+  const { disableSignup, disableSSO, neonLoginEnabled } =
+    useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -253,6 +263,14 @@ export default function IndexLoginForm() {
         <div className="mt-6 text-center">
           <Button variant="link" to="/sso-login">
             Login with SSO
+          </Button>
+        </div>
+      )}
+      {/* BIG: members sign in through Neon CRM (their membership = access). */}
+      {neonLoginEnabled && (
+        <div className="mt-6">
+          <Button variant="secondary" width="full" to="/neon-login">
+            Log in with Neon
           </Button>
         </div>
       )}

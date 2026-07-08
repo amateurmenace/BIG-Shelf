@@ -324,6 +324,14 @@ export default function AssetDetailsPage() {
     })
       ? [{ to: "reminders", content: "Reminders" }]
       : []),
+    // BIG: condition & maintenance log — staff (asset:update) only.
+    ...(userHasPermission({
+      roles,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    })
+      ? [{ to: "condition", content: "Condition" }]
+      : []),
   ];
 
   return (

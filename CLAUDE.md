@@ -9,21 +9,50 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > See **[`BIG-FORK.md`](./BIG-FORK.md)** in the repo root for the fork workflow:
 > remotes, the safe-customization tiers, deployment, and pulling upstream.
 
-Two features are **BIG-only** — they do **not** exist in upstream shelf.nu, so
-expect merge conflicts in these areas when pulling upstream:
+Several features are **BIG-only** — they do **not** exist in upstream shelf.nu,
+so expect merge conflicts in the **core-edit touch points** below when pulling
+upstream. Each is built additively where possible; reconcile by keeping BIG's
+additions on top of upstream's changes.
 
 - **Rooms** — a reservable entity with a color that holds equipment (assets) and
-  can be reserved in bookings (which also pulls in its gear). New code lives in
-  `app/modules/room/`, `app/components/rooms/`, and `app/routes/_layout+/rooms.*`;
-  core-edit touch points are the booking service/overview, the schema
-  (`Asset.roomId`, `Booking.rooms`), the permission matrix (`room` entity), and
-  the sidebar nav.
+  can be reserved in bookings (which also pulls in its gear). Additive:
+  `app/modules/room/`, `app/components/rooms/`, `app/routes/_layout+/rooms.*`.
+  Core edits: the booking service/overview, the schema (`Asset.roomId`,
+  `Booking.rooms`), the permission matrix (`room` entity), the sidebar nav.
 - **Member role** — a new `OrganizationRoles` value mirroring `SELF_SERVICE`,
   wired through the permission matrix, the invite/change-role UIs, and SSO
   mapping.
+- **Member self-service portal** (`/reserve`) — the MEMBER landing page: a
+  browse-and-reserve equipment catalog, the member's own reservations, and a
+  **room-availability calendar** (FullCalendar month/week showing when each room
+  is booked). Additive: `app/modules/big-member/`,
+  `app/routes/_layout+/reserve.tsx`. Core edits: the `home.tsx` MEMBER→`/reserve`
+  redirect and the sidebar nav hook.
+- **Neon CRM integration + multi-path auth** — members are provisioned from Neon
+  CRM (the source of truth) via Neon OAuth, Neon-gated email/password, or
+  SSO→Member. Additive: `app/integrations/neon-crm/`, `app/modules/big-neon-auth/`,
+  `app/routes/_auth+/neon-*`. Core edits: `login.tsx`, `join.tsx`, `send-otp.tsx`,
+  `otp.tsx`, `server/index.ts` (public-route allowlist), the user service,
+  `utils/env.ts` (the `NEON_*` vars).
+- **Digital loan agreements** — a per-checkout e-signed agreement putting
+  liability on the borrower. Additive: `app/modules/big-loan-agreement/`,
+  `app/routes/_layout+/loan-agreement.$bookingId.tsx`. Core edit: the checkout
+  gate in `app/modules/booking/service.server.ts`.
+- **Asset condition & maintenance tracking** — a dated, photo-supported condition
+  log per asset. Additive: `app/modules/big-asset-condition/`,
+  `app/routes/_layout+/assets.$assetId.condition.tsx`. Core edit: the tab
+  registration in `assets.$assetId.tsx`.
 
 When adding new BIG features, prefer **additive** files (new modules / routes /
 components) over editing upstream files, to keep upstream merges clean.
+
+**Every new additive DB table must enable Row-Level Security in its migration.**
+shelf enables RLS on public tables _outside_ migrations, so Prisma-created tables
+ship without it and trip Supabase's `rls_disabled_in_public` critical alert (the
+anon Data API can read/write them). The app reads via Prisma as the table owner
+(bypassing RLS), so `ALTER TABLE "X" ENABLE ROW LEVEL SECURITY;` with no policies
+is deny-all for anon and leaves the app unaffected. See the
+`*_enable_rls_on_additive_tables` migration for the pattern.
 
 ## Essential Commands
 

@@ -370,8 +370,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
           additionalData: { userId, organizationId },
         });
 
-        const { id, selfServiceGroupId, adminGroupId, baseUserGroupId } =
-          payload;
+        const {
+          id,
+          selfServiceGroupId,
+          adminGroupId,
+          baseUserGroupId,
+          memberGroupId,
+        } = payload;
 
         /** User is allowed to edit his/her current organization only not other organizations. */
         if (currentOrganization.id !== id) {
@@ -390,6 +395,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             selfServiceGroupId: selfServiceGroupId as string,
             adminGroupId: adminGroupId as string,
             baseUserGroupId: baseUserGroupId as string,
+            memberGroupId: memberGroupId as string,
           },
         });
 

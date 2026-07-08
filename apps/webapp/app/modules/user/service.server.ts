@@ -380,7 +380,9 @@ export async function createUserFromSSO(
       const hasGroupMappings = !!(
         ssoDetails.adminGroupId ||
         ssoDetails.baseUserGroupId ||
-        ssoDetails.selfServiceGroupId
+        ssoDetails.selfServiceGroupId ||
+        // BIG: the MEMBER role can also be SSO-provisioned via its group id.
+        ssoDetails.memberGroupId
       );
 
       if (hasGroupMappings) {
@@ -577,7 +579,9 @@ export async function updateUserFromSSO(
       const hasGroupMappings = !!(
         ssoDetails.adminGroupId ||
         ssoDetails.baseUserGroupId ||
-        ssoDetails.selfServiceGroupId
+        ssoDetails.selfServiceGroupId ||
+        // BIG: the MEMBER role can also be SSO-provisioned via its group id.
+        ssoDetails.memberGroupId
       );
 
       if (hasGroupMappings) {

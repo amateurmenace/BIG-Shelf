@@ -45,6 +45,9 @@ model User {
   onboarded              Boolean @default(false)
   customerId             String? @unique // Stripe customer id
   sso                    Boolean @default(false)
+  // BIG: Neon CRM Account ID — links a member to their Neon constituent record
+  // (Neon is the source of truth for membership). Null for staff / non-Neon accounts.
+  neonAccountId          String? @unique
   createdWithInvite      Boolean @default(false) // Set to true if the user was created by being invited to a workspace
   skipSubscriptionCheck  Boolean @default(false) // Set to true if the user has opted out of subscription checks
   hasUnpaidInvoice       Boolean @default(false) // Set via Stripe webhooks when invoice payment fails
@@ -2010,4 +2013,102 @@ enum ActivityAction {
 
   // Organization (workspace-level configuration changes)
   ORGANIZATION_QR_ID_DISPLAY_PREFERENCE_CHANGED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BIG: Digital loan agreements
+// Additive-only — plain FK columns (no relations added to Booking/User/
+// Organization) to keep upstream merges clean. App-layer org-scoping enforces
+// integrity. See app/modules/big-loan-agreement/.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The workspace's current equipment loan agreement (editable by admins).
+/// Signatures snapshot the content + version, so edits never alter signed records.
+model LoanAgreementTemplate {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  title          String
+  content        String // Markdown; may contain {{MERGE_FIELDS}}
+  version        Int      @default(1)
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+/// An immutable record that a borrower e-signed the loan agreement for a booking
+/// checkout. Snapshots exactly what was signed (title, version, filled content).
+model LoanAgreementSignature {
+  id               String   @id @default(cuid())
+  organizationId   String
+  bookingId        String
+  signedByUserId   String
+  signerName       String
+  signerEmail      String
+  agreementTitle   String
+  agreementVersion Int
+  contentSnapshot  String // the exact filled terms the borrower agreed to
+  ipAddress        String?
+  userAgent        String?
+  signedAt         DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([organizationId])
+  @@index([signedByUserId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BIG: Asset condition & maintenance log (with photos)
+// Additive-only — plain FK columns to Asset/User (no relations added to those
+// upstream models). The two BIG models relate to each other. App-layer scoping.
+// See app/modules/big-asset-condition/.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AssetConditionType {
+  CONDITION // routine condition report
+  DAMAGE // damage report
+  MAINTENANCE // maintenance / repair performed
+  INSPECTION // inspection
+}
+
+enum AssetConditionGrade {
+  GOOD
+  FAIR
+  POOR
+  OUT_OF_SERVICE
+}
+
+/// A dated condition / damage / maintenance entry for an asset — builds a
+/// documented history over time. Photos hang off each entry.
+model AssetConditionLog {
+  id             String               @id @default(cuid())
+  organizationId String
+  assetId        String
+  type           AssetConditionType   @default(CONDITION)
+  grade          AssetConditionGrade?
+  note           String
+  createdById    String
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  images AssetConditionImage[]
+
+  @@index([assetId])
+  @@index([organizationId])
+}
+
+/// A photo documenting an asset's condition, attached to a condition-log entry.
+/// Stored in the public Supabase bucket (mirrors AuditImage).
+model AssetConditionImage {
+  id             String   @id @default(cuid())
+  organizationId String
+  conditionLogId String
+  imageUrl       String
+  thumbnailUrl   String?
+  uploadedById   String
+  createdAt      DateTime @default(now())
+
+  conditionLog AssetConditionLog @relation(fields: [conditionLogId], references: [id], onDelete: Cascade)
+
+  @@index([conditionLogId])
+  @@index([organizationId])
 }

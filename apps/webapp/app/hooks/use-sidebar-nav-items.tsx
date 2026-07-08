@@ -68,7 +68,7 @@ export type NavItem =
 export function useSidebarNavItems() {
   const { isAdmin, canUseBookings, subscription, unreadUpdatesCount } =
     useLoaderData<typeof loader>();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, isMember } = useUserRoleHelper();
   const currentOrganization = useCurrentOrganization();
   const isPersonalOrganization = isPersonalOrg(currentOrganization);
 
@@ -104,6 +104,14 @@ export function useSidebarNavItems() {
     {
       type: "label",
       title: "Asset management",
+    },
+    {
+      // BIG: member-only entry point to the self-service reservation portal.
+      type: "child",
+      title: "Reserve equipment",
+      to: "/reserve",
+      Icon: CalendarRangeIcon,
+      hidden: !isMember,
     },
     {
       type: "child",

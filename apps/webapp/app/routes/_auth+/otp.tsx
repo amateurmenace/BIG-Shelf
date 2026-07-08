@@ -13,6 +13,7 @@ import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import { linkNeonAccountByEmail } from "~/modules/big-neon-auth/service.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -107,6 +108,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
               throw createError;
             }
           }
+
+          // BIG: stamp the new member's Neon Account ID (best-effort, never throws).
+          await linkNeonAccountByEmail(email);
         }
 
         // Setting the auth session and redirecting user to assets page

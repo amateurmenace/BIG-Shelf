@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "webapp",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@shelf/webapp",
+        "exec",
+        "dotenv",
+        "-e",
+        "../../.env",
+        "--",
+        "vite",
+        "--host"
+      ],
+      "port": 3000
+    }
+  ]
+}
