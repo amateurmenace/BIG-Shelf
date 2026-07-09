@@ -408,13 +408,13 @@ function KioskBoard() {
     <>
       {/* Masthead — the BIG Shelf logo leads; it sits on a white chip so the
           navy/magenta wordmark stays legible on the dark board. */}
-      <header className="flex shrink-0 items-center justify-between px-8 pb-3 pt-5">
+      <header className="flex shrink-0 items-center justify-between px-8 pb-3 pt-4">
         <div className="flex items-center gap-5">
-          <span className="rounded-2xl bg-white px-5 py-3 shadow-lg">
+          <span className="rounded-2xl bg-white px-5 py-2.5 shadow-lg">
             <img
               src="/static/images/big/big-shelf-full.png"
               alt={organizationName}
-              className="h-10 w-auto"
+              className="h-9 w-auto"
             />
           </span>
           <div>
@@ -457,12 +457,15 @@ function KioskBoard() {
       {/* Body — four quadrants:
           left column  = room schedule (top) over the booking cards (bottom),
           right column = day picker (top) over the closed-days calendar
-          (bottom-right). Everything fits one 16:9 screen without scrolling. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 px-8 pb-6 lg:grid-cols-[minmax(0,3fr),minmax(280px,1fr)]">
+          (bottom-right). A flex ROW (not an auto-sized grid row) so the body
+          can never grow taller than the screen — sections shrink and scroll
+          internally instead of painting over each other (the v27 TV bug). */}
+      <div className="flex min-h-0 flex-1 gap-5 px-8 pb-6">
         {/* Left column */}
-        <div className="flex min-h-0 flex-col gap-4">
-          {/* Timeline board */}
-          <div className="flex min-h-0 flex-1 flex-col rounded-2xl bg-gray-800/60 p-5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+          {/* Timeline board — overflow-hidden so rows can never spill out of
+              the card and under the strip below, whatever the screen height */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-gray-800/60 p-5">
             <div className="mb-2 flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
@@ -489,7 +492,9 @@ function KioskBoard() {
             {rooms.length === 0 ? (
               <p className="mt-6 text-gray-400">No rooms configured yet.</p>
             ) : (
-              <div className="mt-2 flex min-h-0 flex-1 flex-col justify-evenly gap-2">
+              // Scrolls when there are more rooms than fit, so the timeline is
+              // never cut off by the cards below and rows never overlap.
+              <div className="mt-2 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
                 {rooms.map((room) => (
                   <RoomTimelineRow
                     key={room.id}
@@ -501,12 +506,13 @@ function KioskBoard() {
                 ))}
               </div>
             )}
-            <p className="mt-2 text-center text-sm text-gray-500">
+            <p className="mt-2 shrink-0 text-center text-sm text-gray-500">
               Tap any open slot to reserve it on the spot
             </p>
           </div>
 
-          {/* Bottom cards — the width of the room-schedule section above */}
+          {/* Bottom cards — compact strip; kept short so the timeline gets
+              the vertical space. The width of the room-schedule section. */}
           <div
             className="grid shrink-0 gap-4"
             style={{
@@ -520,7 +526,7 @@ function KioskBoard() {
         </div>
 
         {/* Right column — day picker (top) + closed-days calendar (bottom) */}
-        <div className="flex min-h-0 flex-col gap-4">
+        <div className="flex min-h-0 w-[300px] shrink-0 flex-col gap-4">
           <WeekAtAGlance
             weekCounts={weekCounts}
             selectedDay={selectedDay}
@@ -530,7 +536,7 @@ function KioskBoard() {
           <ClosedDatesCalendar
             closedDays={closedDays}
             now={now}
-            className="min-h-0 flex-1"
+            className="min-h-0 flex-1 overflow-y-auto"
           />
         </div>
       </div>
@@ -645,7 +651,7 @@ function RoomTimelineRow({
     : -1;
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex shrink-0 items-center gap-3">
       {/* Identity + status */}
       <div className="w-40 shrink-0">
         <p className="flex items-center gap-2 truncate text-base font-semibold">
@@ -887,26 +893,24 @@ function BookEquipmentCard() {
 
   return (
     <>
-      <div className="flex h-full items-center gap-4 rounded-2xl bg-gray-800/60 p-5">
+      {/* Compact: whole card taps to enlarge the QR full-screen. */}
+      <button
+        type="button"
+        onClick={() => setEnlarged(true)}
+        className="flex h-20 items-center gap-3 rounded-2xl bg-gray-800/60 p-3 text-left transition hover:bg-gray-800"
+      >
         <QRImage
           value={url}
           alt="QR code linking to the member reservation portal"
-          className="size-24 shrink-0 rounded-lg bg-white p-1.5"
+          className="size-14 shrink-0 rounded-md bg-white p-1"
         />
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold">Book equipment</h2>
-          <p className="mt-1 text-xs text-gray-400">
-            Reserve cameras, audio, lighting &amp; more — scan with your phone.
-          </p>
-          <button
-            type="button"
-            onClick={() => setEnlarged(true)}
-            className="mt-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20"
-          >
-            Show a bigger code
-          </button>
-        </div>
-      </div>
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold">Book equipment</span>
+          <span className="block truncate text-xs text-gray-400">
+            Scan to reserve gear · tap to enlarge
+          </span>
+        </span>
+      </button>
       {enlarged ? (
         <QRModal
           url={url}
@@ -919,29 +923,31 @@ function BookEquipmentCard() {
   );
 }
 
-/** "Equipment out today" card — going-out / due-back counts. */
+/** "Equipment out today" card — going-out / due-back counts (compact). */
 function EquipmentTodayCard({
   todayCounts,
 }: {
   todayCounts: { departures: number; returns: number };
 }) {
   return (
-    <div className="flex h-full flex-col rounded-2xl bg-gray-800/60 p-5">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
-        Equipment out today
-      </h2>
-      <div className="mt-auto flex gap-8 pt-3">
-        <div>
-          <p className="text-4xl font-semibold tabular-nums">
+    <div className="flex h-20 items-center justify-between gap-2 rounded-2xl bg-gray-800/60 p-3">
+      <span className="text-xs font-semibold uppercase leading-tight tracking-wide text-gray-400">
+        Out
+        <br />
+        today
+      </span>
+      <div className="flex gap-4">
+        <div className="text-center">
+          <p className="text-2xl font-semibold tabular-nums leading-none">
             {todayCounts.departures}
           </p>
-          <p className="text-xs text-gray-400">going out</p>
+          <p className="mt-0.5 text-xs text-gray-400">out</p>
         </div>
-        <div>
-          <p className="text-4xl font-semibold tabular-nums">
+        <div className="text-center">
+          <p className="text-2xl font-semibold tabular-nums leading-none">
             {todayCounts.returns}
           </p>
-          <p className="text-xs text-gray-400">due back</p>
+          <p className="mt-0.5 text-xs text-gray-400">back</p>
         </div>
       </div>
     </div>
@@ -968,12 +974,12 @@ function NewsBanner({ messages }: { messages: string[] }) {
   const active = index % messages.length;
 
   return (
-    <div className="mx-8 mb-3 flex shrink-0 items-center gap-3 rounded-2xl border border-primary-400/40 bg-primary-500/15 px-5 py-2.5">
+    <div className="mx-8 mb-3 flex shrink-0 items-center gap-3 rounded-2xl border border-primary-400/40 bg-primary-500/15 px-5 py-2">
       <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary-500 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-white">
         <MegaphoneIcon className="size-3.5" aria-hidden />
         News
       </span>
-      <p className="min-w-0 flex-1 truncate text-lg font-medium text-white">
+      <p className="min-w-0 flex-1 truncate text-base font-medium text-white">
         {messages[active]}
       </p>
       {messages.length > 1 ? (
@@ -1010,7 +1016,7 @@ function PromoCard({
   };
 }) {
   return (
-    <div className="relative h-32 overflow-hidden rounded-2xl bg-gray-800">
+    <div className="relative h-28 overflow-hidden rounded-2xl bg-gray-800">
       <img
         src={promo.imageUrl}
         alt=""
@@ -1065,27 +1071,21 @@ function MembershipCard({
   };
 }) {
   return (
-    <div className="flex h-full items-center justify-between gap-4 rounded-2xl bg-gradient-to-br from-primary-600 via-primary-500 to-primary-400 p-5">
+    <div className="flex h-20 items-center justify-between gap-3 rounded-2xl bg-gradient-to-br from-primary-600 via-primary-500 to-primary-400 p-3">
       <div className="min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-widest text-white/80">
-          New here? Welcome!
-        </p>
-        <p className="mt-0.5 text-lg font-semibold leading-tight">
+        <p className="text-sm font-semibold leading-tight">
           {membership.headline ?? "Become a BIG member"}
         </p>
-        <p className="mt-0.5 line-clamp-2 text-sm text-white/90">
+        <p className="mt-0.5 truncate text-xs text-white/90">
           {membership.blurb ??
-            "Everyone's welcome at BIG! Members borrow gear, book studios, and join classes — come create with us."}
+            "Scan to join — borrow gear, book studios, take classes."}
         </p>
       </div>
-      <div className="flex shrink-0 flex-col items-center gap-1">
-        <QRImage
-          value={membership.signupUrl}
-          alt="QR code to sign up for a membership"
-          className="size-20 rounded-lg bg-white p-1"
-        />
-        <span className="text-xs font-medium text-white/90">Scan to join</span>
-      </div>
+      <QRImage
+        value={membership.signupUrl}
+        alt="QR code to sign up for a membership"
+        className="size-14 shrink-0 rounded-md bg-white p-1"
+      />
     </div>
   );
 }
