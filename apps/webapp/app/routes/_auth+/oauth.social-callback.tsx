@@ -15,6 +15,7 @@
  * @see {@link file://./oauth.callback.tsx} — the SSO equivalent this mirrors
  */
 import { useEffect } from "react";
+import { OrganizationRoles } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -28,8 +29,15 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
+import {
+  assertActiveNeonMemberForSignup,
+  linkNeonAccountByEmail,
+} from "~/modules/big-neon-auth/service.server";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { createUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
+import { NEON_MEMBER_ORG_ID } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData, safeRedirect } from "~/utils/http.server";
 import { randomUsernameFromEmail } from "~/utils/user";
@@ -80,10 +88,56 @@ export async function action({ request, context }: ActionFunctionArgs) {
         });
       }
 
-      // Brand-new: provision a Shelf user (+ personal workspace). The Supabase
-      // auth account already exists from the OAuth flow (id = authSession.userId),
-      // so createUser only creates the Shelf-side records. `isSSO` marks it as
-      // external-auth (no password, onboarded).
+      // BIG: cross-reference the social email against Neon. Active members are
+      // provisioned straight into the member workspace as MEMBER; a non-member
+      // gets the membership message (thrown → shown below) and NO account is
+      // created — their social token simply expires. Returns null only when Neon
+      // is unconfigured (local dev), where we keep the original personal-workspace
+      // behavior so social login still works.
+      const neonMember = await assertActiveNeonMemberForSignup(
+        authSession.email
+      );
+
+      if (neonMember) {
+        if (!NEON_MEMBER_ORG_ID) {
+          throw new ShelfError({
+            cause: null,
+            title: "Member workspace not configured",
+            message:
+              "Your membership is active, but the member workspace isn't set up yet (NEON_MEMBER_ORG_ID). Please contact us.",
+            label,
+            status: 503,
+          });
+        }
+        // The Supabase auth account already exists from the OAuth flow, so
+        // createUser only writes the shelf-side records + the MEMBER membership
+        // in BIG's workspace (isSSO → no password, onboarded).
+        await createUser({
+          email: authSession.email,
+          userId: authSession.userId,
+          username: randomUsernameFromEmail(authSession.email),
+          firstName: firstName || neonMember.firstName || undefined,
+          lastName: lastName || neonMember.lastName || undefined,
+          isSSO: true,
+          organizationId: NEON_MEMBER_ORG_ID,
+          roles: [OrganizationRoles.MEMBER],
+        });
+        // Best-effort: stamp their Neon account id for future reconciliation.
+        await linkNeonAccountByEmail(authSession.email);
+
+        context.setSession(authSession);
+        // Land them in the member workspace and on the reserve hub.
+        return redirect(safeRedirect("/reserve"), {
+          headers: [
+            setCookie(
+              await setSelectedOrganizationIdCookie(NEON_MEMBER_ORG_ID)
+            ),
+          ],
+        });
+      }
+
+      // Neon unconfigured (dev) → original behavior: a personal workspace so
+      // social login still works locally.
       await createUser({
         email: authSession.email,
         userId: authSession.userId,
@@ -168,13 +222,34 @@ export default function SocialCallback() {
   return (
     <div className="flex justify-center text-center">
       {fetcherData?.error ? (
-        <div>
-          <div className="text-sm text-error-500">
-            {fetcherData.error.message}
+        <div className="mx-auto max-w-md text-left">
+          <h2 className="mb-2 text-center text-lg font-semibold text-gray-900">
+            {fetcherData.error.title || "Something went wrong"}
+          </h2>
+          <p className="text-sm text-gray-600">{fetcherData.error.message}</p>
+          {fetcherData.error.title === "Active membership required" ? (
+            <div className="mt-4 flex flex-col gap-2 text-center text-sm">
+              <a
+                href="https://brooklineinteractive.app.neoncrm.com/forms/membership"
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-primary-600 underline"
+              >
+                Sign up for a BIG Membership →
+              </a>
+              <a
+                href="mailto:jessica@brooklineinteractive.org"
+                className="text-gray-600 underline"
+              >
+                Email jessica@brooklineinteractive.org
+              </a>
+            </div>
+          ) : null}
+          <div className="mt-4 text-center">
+            <Button to="/" variant="secondary">
+              Back to login
+            </Button>
           </div>
-          <Button to="/" className="mt-4">
-            Back to login
-          </Button>
         </div>
       ) : (
         <Spinner />

@@ -123,6 +123,9 @@ export async function createInvite(
     teamMemberId?: Invite["teamMemberId"];
     userId: string;
     extraMessage?: string | null;
+    // BIG: exempt the invitee from the Neon membership check (carried onto the
+    // UserOrganization when the invite is accepted).
+    membershipCheckExempt?: boolean;
   }
 ) {
   let {
@@ -134,6 +137,7 @@ export async function createInvite(
     teamMemberId,
     userId,
     extraMessage,
+    membershipCheckExempt,
   } = payload;
 
   try {
@@ -250,6 +254,7 @@ export async function createInvite(
       inviteeEmail,
       expiresAt,
       inviteCode: generateRandomCode(6),
+      membershipCheckExempt: Boolean(membershipCheckExempt),
       ...(sanitizedMessage && { inviteMessage: sanitizedMessage }),
     };
 
@@ -373,6 +378,8 @@ export async function updateInviteStatus({
         firstName,
         lastName,
         createdWithInvite: true,
+        // BIG: carry the admin's exemption from the invite onto the membership.
+        membershipCheckExempt: invite.membershipCheckExempt,
       });
 
       Object.assign(data, {

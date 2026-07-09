@@ -17,7 +17,11 @@ import type {
 import { data, Form, useActionData, useLoaderData } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
-import { isNeonApiConfigured } from "~/integrations/neon-crm/client.server";
+import {
+  isNeonApiConfigured,
+  resolveNeonMemberByEmail,
+  type NeonMember,
+} from "~/integrations/neon-crm/client.server";
 import {
   previewNeonMemberSync,
   syncNeonMembers,
@@ -67,6 +71,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await request.formData();
     const intent = formData.get("intent");
 
+    // Read-only membership lookup — diagnoses "in Neon but not getting verified".
+    // Shares this route's generalSettings:update gate; performs no writes.
+    if (intent === "check") {
+      const email = String(formData.get("email") ?? "").trim();
+      const member: NeonMember | null = email
+        ? await resolveNeonMemberByEmail(email)
+        : null;
+      return payload({ check: { queriedEmail: email, member } });
+    }
+
     // "sync" writes; anything else is the read-only preview.
     const result: NeonSyncResult =
       intent === "sync"
@@ -106,6 +120,8 @@ export default function MemberSyncSettings() {
 
   const result =
     actionData && "result" in actionData ? actionData.result : undefined;
+  const check =
+    actionData && "check" in actionData ? actionData.check : undefined;
   const errorMessage =
     actionData && "error" in actionData ? actionData.error?.message : undefined;
 
@@ -139,27 +155,84 @@ export default function MemberSyncSettings() {
           )}
         </div>
       ) : (
-        <div className="flex flex-wrap items-center gap-3">
-          <Form method="post">
-            <input type="hidden" name="intent" value="preview" />
-            <Button type="submit" variant="secondary" disabled={disabled}>
-              {disabled ? "Working…" : "Preview"}
-            </Button>
-          </Form>
-          <Form method="post">
-            <input type="hidden" name="intent" value="sync" />
-            <Button type="submit" disabled={disabled}>
-              {disabled ? "Syncing…" : "Sync now"}
-            </Button>
-          </Form>
-          <span className="text-xs text-gray-500">
-            Preview is read-only. Sync now provisions/updates member logins.
-          </span>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Form method="post">
+              <input type="hidden" name="intent" value="preview" />
+              <Button type="submit" variant="secondary" disabled={disabled}>
+                {disabled ? "Working…" : "Preview"}
+              </Button>
+            </Form>
+            <Form method="post">
+              <input type="hidden" name="intent" value="sync" />
+              <Button type="submit" disabled={disabled}>
+                {disabled ? "Syncing…" : "Sync now"}
+              </Button>
+            </Form>
+            <span className="text-xs text-gray-500">
+              Preview is read-only. Sync now provisions/updates member logins.
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1 border-t border-gray-100 pt-3">
+            <span className="text-xs font-medium text-gray-700">
+              Check a member&apos;s Neon status
+            </span>
+            <Form method="post" className="flex flex-wrap items-center gap-2">
+              <input type="hidden" name="intent" value="check" />
+              <input
+                type="email"
+                name="email"
+                required
+                placeholder="member@example.com"
+                aria-label="Member email to check"
+                className="rounded border border-gray-200 px-3 py-1.5 text-sm"
+              />
+              <Button type="submit" variant="secondary" disabled={disabled}>
+                {disabled ? "Checking…" : "Check membership"}
+              </Button>
+            </Form>
+            <span className="text-xs text-gray-500">
+              Diagnose &quot;in Neon but not getting verified&quot; — matches by
+              any email on the member&apos;s Neon record.
+            </span>
+          </div>
         </div>
       )}
 
       {errorMessage ? (
         <p className="text-sm text-error-500">{errorMessage}</p>
+      ) : null}
+
+      {check ? (
+        <div className="rounded border border-gray-200 p-3 text-sm">
+          {!check.member ? (
+            <p className="text-gray-700">
+              No match — no Neon account found for{" "}
+              <span className="font-medium">{check.queriedEmail}</span>. If they
+              have a membership, add this email to their Neon record.
+            </p>
+          ) : (
+            <p className="text-gray-700">
+              Found{" "}
+              <span className="font-medium">
+                {check.member.firstName} {check.member.lastName}
+              </span>{" "}
+              (<span className="font-medium">{check.member.email}</span>) —{" "}
+              <span
+                className={
+                  check.member.isActiveMember
+                    ? "font-medium text-success-600"
+                    : "font-medium text-error-500"
+                }
+              >
+                {check.member.isActiveMember
+                  ? "ACTIVE member ✓"
+                  : "found but NOT active"}
+              </span>
+            </p>
+          )}
+        </div>
       ) : null}
 
       {result ? (
@@ -173,7 +246,7 @@ export default function MemberSyncSettings() {
               {result.totalActive === 1 ? "" : "s"} in Neon
             </span>
           </p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <Stat
               label={result.previewOnly ? "Would create" : "Created"}
               value={result.created}
@@ -183,6 +256,10 @@ export default function MemberSyncSettings() {
               value={result.attached}
             />
             <Stat label="Already members" value={result.skipped} />
+            <Stat
+              label={result.previewOnly ? "Would deactivate" : "Deactivated"}
+              value={result.deactivated}
+            />
             <Stat label="Failed" value={result.failed} />
           </div>
 

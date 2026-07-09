@@ -46,6 +46,12 @@ export type NeonSyncResult = {
   skipped: number;
   /** Members that could not be provisioned. */
   failed: number;
+  /**
+   * Members whose Neon membership has lapsed — they were provisioned from Neon
+   * but are no longer in the active set — and had their MEMBER role removed
+   * (reconcile). Exempt (admin-invited non-Neon) members are never counted here.
+   */
+  deactivated: number;
   /** Whether these numbers are a dry-run projection (preview) or actual. */
   previewOnly: boolean;
   /** Up to {@link MAX_REPORTED_ERRORS} per-member failures. */
@@ -162,6 +168,68 @@ async function loadMembersAndPriorState() {
 }
 
 /**
+ * Reconcile: find members whose Neon membership has lapsed and strip their MEMBER
+ * role. A member is "lapsed" when they hold MEMBER in the workspace, were
+ * provisioned FROM Neon (their `neonAccountId` is stamped), are NOT exempt, and
+ * are NOT in the current active-member set. Admin-invited non-Neon members
+ * (exempt, or with no Neon id) are never touched. Reversible — a later sync
+ * re-adds MEMBER when they renew.
+ *
+ * @param activeEmails - Lowercased emails of currently-active Neon members
+ * @param organizationId - The member workspace
+ * @param apply - `false` (preview) only counts; `true` removes the role
+ * @returns How many members were (or would be) deactivated
+ */
+async function reconcileLapsedMembers(
+  activeEmails: Set<string>,
+  organizationId: string,
+  apply: boolean
+): Promise<number> {
+  const currentMembers = await db.userOrganization.findMany({
+    where: {
+      organizationId,
+      roles: { has: OrganizationRoles.MEMBER },
+      membershipCheckExempt: false,
+      user: { neonAccountId: { not: null } },
+    },
+    select: { id: true, roles: true, user: { select: { email: true } } },
+  });
+
+  const lapsed = currentMembers.filter(
+    (membership) => !activeEmails.has(membership.user.email.toLowerCase())
+  );
+
+  if (apply) {
+    for (const membership of lapsed) {
+      const newRoles = membership.roles.filter(
+        (role) => role !== OrganizationRoles.MEMBER
+      );
+      // Swallow per-row errors — one failed downgrade must not abort the sync;
+      // the next run reconciles it. Empty roles = no member access (handled).
+      await db.userOrganization
+        .updateMany({
+          // Org-scoped (the ids already came from an organizationId-filtered
+          // query above); updateMany permits the composite where.
+          where: { id: membership.id, organizationId },
+          data: { roles: { set: newRoles } },
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  return lapsed.length;
+}
+
+/** Lowercased active-member email set, for reconcile lookups. */
+function toActiveEmailSet(members: { email?: string | null }[]): Set<string> {
+  return new Set(
+    members
+      .map((member) => member.email?.trim().toLowerCase())
+      .filter((email): email is string => Boolean(email))
+  );
+}
+
+/**
  * READ-ONLY preview: reports how many members would be created / attached /
  * skipped without writing anything. Safe to run anytime.
  *
@@ -169,7 +237,8 @@ async function loadMembersAndPriorState() {
  * @throws {ShelfError} If Neon or the member workspace isn't configured
  */
 export async function previewNeonMemberSync(): Promise<NeonSyncResult> {
-  const { members, priorByEmail } = await loadMembersAndPriorState();
+  const { members, organizationId, priorByEmail } =
+    await loadMembersAndPriorState();
 
   const result: NeonSyncResult = {
     totalActive: members.length,
@@ -177,6 +246,7 @@ export async function previewNeonMemberSync(): Promise<NeonSyncResult> {
     attached: 0,
     skipped: 0,
     failed: 0,
+    deactivated: 0,
     previewOnly: true,
     errors: [],
   };
@@ -196,6 +266,13 @@ export async function previewNeonMemberSync(): Promise<NeonSyncResult> {
       result.skipped++;
     }
   }
+
+  // Project how many current Neon-provisioned members would be deactivated.
+  result.deactivated = await reconcileLapsedMembers(
+    toActiveEmailSet(members),
+    organizationId,
+    false
+  );
 
   return result;
 }
@@ -218,6 +295,7 @@ export async function syncNeonMembers(): Promise<NeonSyncResult> {
     attached: 0,
     skipped: 0,
     failed: 0,
+    deactivated: 0,
     previewOnly: false,
     errors: [],
   };
@@ -267,6 +345,14 @@ export async function syncNeonMembers(): Promise<NeonSyncResult> {
       }
     }
   }
+
+  // Reconcile: strip MEMBER from Neon-provisioned members who are no longer in
+  // the active set. Exempt / non-Neon (admin-invited) members are untouched.
+  result.deactivated = await reconcileLapsedMembers(
+    toActiveEmailSet(members),
+    organizationId,
+    true
+  );
 
   return result;
 }

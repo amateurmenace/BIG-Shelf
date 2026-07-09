@@ -233,6 +233,7 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             isSSO={item.sso || false}
             role={item.role}
             roleEnum={item.roleEnum}
+            membershipCheckExempt={item.membershipCheckExempt}
           />
         ) : null}
       </Td>

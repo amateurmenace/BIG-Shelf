@@ -24,6 +24,8 @@ export interface TeamMembersWithUserOrInvite {
   roleEnum: OrganizationRoles;
   userId: string | null;
   sso: boolean;
+  /** BIG: whether this member bypasses the active-Neon-membership reserve gate. */
+  membershipCheckExempt?: boolean;
   custodies?: number;
   inviteMessage?: string | null;
 }
@@ -84,6 +86,7 @@ export async function getPaginatedAndFilterableSettingUsers({
             },
           },
           roles: true,
+          membershipCheckExempt: true,
         },
       }),
 
@@ -112,6 +115,7 @@ export async function getPaginatedAndFilterableSettingUsers({
         roleEnum: um.roles[0],
         userId: um.user.id,
         sso: um.user.sso,
+        membershipCheckExempt: um.membershipCheckExempt,
         custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,
       }));
 

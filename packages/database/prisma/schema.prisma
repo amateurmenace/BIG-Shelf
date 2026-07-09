@@ -825,6 +825,11 @@ model UserOrganization {
   organizationId String
 
   roles     OrganizationRoles[]
+  // BIG: when true, this member bypasses the active-Neon-membership check at
+  // reservation time. Admins invite non-Neon users (volunteers, partners) and
+  // tick "doesn't require a membership". Neon-provisioned members stay false and
+  // are enforced against Neon; the sync reconcile never touches exempt members.
+  membershipCheckExempt Boolean @default(false)
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
 
@@ -1177,6 +1182,9 @@ model Invite {
   inviteCode    String
   roles         OrganizationRoles[]
   inviteMessage String?             @db.VarChar(1000)
+  // BIG: carries the admin's "doesn't require a membership" choice from invite
+  // creation to acceptance, where it's copied onto the new UserOrganization.
+  membershipCheckExempt Boolean @default(false)
 
   // Datetime
   expiresAt DateTime

@@ -27,6 +27,7 @@ import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
 import { bookingNeedsAgreementSignature } from "~/modules/big-loan-agreement/service.server";
+import { assertMemberCanReserve } from "~/modules/big-neon-auth/service.server";
 import { notifyWaitlistForFreedAssets } from "~/modules/big-waitlist/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -452,6 +453,15 @@ export async function createBooking({
   hints: ClientHint;
 }) {
   try {
+    // BIG: reservation gate. A MEMBER may only reserve if they're exempt or a
+    // currently active Neon member; no-op for staff and exempt users. Placed in
+    // createBooking so it covers every reservation entry point, regardless of
+    // how the member logged in. Fails open only if Neon itself is unreachable.
+    await assertMemberCanReserve({
+      userId: booking.creatorId,
+      organizationId: booking.organizationId,
+    });
+
     const dataToCreate: Prisma.BookingCreateInput = {
       name: booking.name,
       from: booking.from,

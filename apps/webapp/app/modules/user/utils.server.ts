@@ -22,6 +22,7 @@ import { randomUsernameFromEmail } from "~/utils/user";
 import {
   changeUserRole,
   revokeAccessToOrganization,
+  setMembershipExempt,
   transferEntitiesToNewOwner,
 } from "./service.server";
 import { revokeAccessEmailText, roleChangeEmailText } from "../invite/helpers";
@@ -48,6 +49,7 @@ export async function resolveUserAction(
         "resend",
         "cancelInvite",
         "changeRole",
+        "setMembershipExempt",
       ]),
     }),
     {
@@ -275,6 +277,44 @@ export async function resolveUserAction(
 
       return payload(null);
     }
+    case "setMembershipExempt": {
+      await validatePermission({
+        roles: [callerRole],
+        action: PermissionAction.changeRole,
+        entity: PermissionEntity.teamMember,
+        organizationId,
+        userId,
+      });
+
+      const { userId: targetUserId, exempt } = parseData(
+        formData,
+        z.object({
+          userId: z.string(),
+          exempt: z
+            .union([z.literal("true"), z.literal("false")])
+            .transform((value) => value === "true"),
+        }),
+        { additionalData: { organizationId, intent } }
+      );
+
+      await setMembershipExempt({
+        userId: targetUserId,
+        organizationId,
+        exempt,
+      });
+
+      sendNotification({
+        title: "Membership requirement updated",
+        message: exempt
+          ? "This member no longer needs an active Neon membership to reserve."
+          : "This member now requires an active Neon membership to reserve.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      return payload({ success: true });
+    }
+
     case "changeRole": {
       await validatePermission({
         roles: [callerRole],

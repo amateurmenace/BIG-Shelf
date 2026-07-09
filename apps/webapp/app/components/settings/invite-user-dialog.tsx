@@ -55,6 +55,13 @@ export const InviteUserFormSchema = z.object({
     )
   ),
   inviteMessage: z.string().max(1000).optional(),
+  // BIG: when ticked, the invitee bypasses the active-Neon-membership check and
+  // can reserve without a membership (staff, volunteers, partners). Unchecked
+  // checkboxes submit nothing, so absence → false.
+  membershipCheckExempt: z
+    .string()
+    .optional()
+    .transform((value) => value === "on"),
 });
 
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
@@ -222,6 +229,28 @@ export default function InviteUserDialog({
                     zo.errors?.role()?.message}
                 </p>
               </When>
+
+              {/* BIG: exempt this invitee from the Neon membership requirement. */}
+              <label
+                htmlFor="membershipCheckExempt"
+                className="flex items-start gap-2 pt-1.5"
+              >
+                <input
+                  type="checkbox"
+                  id="membershipCheckExempt"
+                  name={zo.fields.membershipCheckExempt()}
+                  disabled={disabled}
+                  className="mt-0.5 size-4 rounded border-gray-300 text-primary-600"
+                />
+                <span className="text-[14px] text-gray-600">
+                  <span className="font-medium text-gray-700">
+                    Doesn’t require a BIG membership
+                  </span>
+                  <br />
+                  Tick for staff, volunteers or partners who should reserve
+                  without an active Neon membership.
+                </span>
+              </label>
 
               <div className="pt-1.5">
                 <Input

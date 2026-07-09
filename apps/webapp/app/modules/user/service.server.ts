@@ -183,9 +183,12 @@ async function createUserOrgAssociation(
     roles: OrganizationRoles[];
     organizationIds: Organization["id"][];
     userId: User["id"];
+    // BIG: exempt this membership from the Neon membership check (admin-invited
+    // non-Neon users). Omitted → leaves the column at its default (false).
+    membershipCheckExempt?: boolean;
   }
 ) {
-  const { organizationIds, userId, roles } = payload;
+  const { organizationIds, userId, roles, membershipCheckExempt } = payload;
 
   try {
     return await Promise.all(
@@ -201,11 +204,17 @@ async function createUserOrgAssociation(
             userId,
             organizationId,
             roles,
+            ...(membershipCheckExempt !== undefined && {
+              membershipCheckExempt,
+            }),
           },
           update: {
             roles: {
               push: roles,
             },
+            ...(membershipCheckExempt !== undefined && {
+              membershipCheckExempt,
+            }),
           },
         })
       )
@@ -228,12 +237,16 @@ export async function createUserOrAttachOrg({
   firstName,
   lastName,
   createdWithInvite = false,
+  membershipCheckExempt = false,
 }: Pick<User, "email" | "firstName"> &
   Partial<Pick<User, "lastName">> & {
     organizationId: Organization["id"];
     roles: OrganizationRoles[];
     password: string;
     createdWithInvite: boolean;
+    // BIG: exempt this member from the Neon membership check (admin-invited
+    // non-Neon users). Defaults to false → normal Neon-gated members.
+    membershipCheckExempt?: boolean;
   }) {
   try {
     const shelfUser = await db.user.findFirst({
@@ -276,6 +289,7 @@ export async function createUserOrAttachOrg({
         firstName,
         lastName,
         createdWithInvite,
+        membershipCheckExempt,
       });
 
       await ensureAssetIndexModeForRole({
@@ -292,6 +306,7 @@ export async function createUserOrAttachOrg({
       userId: shelfUser.id,
       organizationIds: [organizationId],
       roles,
+      membershipCheckExempt,
     });
 
     await ensureAssetIndexModeForRole({
@@ -661,6 +676,8 @@ export async function createUser(
     lastName?: User["lastName"];
     isSSO?: boolean;
     createdWithInvite?: boolean;
+    // BIG: exempt this member from the Neon membership check (see UserOrganization).
+    membershipCheckExempt?: boolean;
   }
 ) {
   const {
@@ -673,6 +690,7 @@ export async function createUser(
     lastName,
     isSSO,
     createdWithInvite,
+    membershipCheckExempt,
   } = payload;
 
   /**
@@ -778,6 +796,7 @@ export async function createUser(
               userId: user.id,
               organizationIds: [organizationId],
               roles,
+              membershipCheckExempt,
             }),
         ]);
 
@@ -1399,6 +1418,60 @@ export async function revokeAccessToOrganization({
  *
  * Returns the target user's previous role alongside the updated record.
  */
+/**
+ * Sets `UserOrganization.membershipCheckExempt` for an existing member in place,
+ * so an admin can waive the Neon reserve gate for a specific person (a partner,
+ * volunteer, or someone whose Neon email doesn't match) WITHOUT re-inviting.
+ * Targets the membership by the userId_organizationId composite key; the
+ * organizationId comes from the caller's requirePermission, never from input.
+ *
+ * @param args.userId - The member whose exemption is being changed
+ * @param args.organizationId - The caller's workspace (org-scope guard)
+ * @param args.exempt - Whether the member bypasses the active-membership check
+ * @throws {ShelfError} If the user isn't a member of this organization
+ */
+export async function setMembershipExempt({
+  userId,
+  organizationId,
+  exempt,
+  tx: client = db,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+  exempt: boolean;
+  tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+}) {
+  try {
+    const userOrg = await client.userOrganization.findFirst({
+      where: { userId, organizationId },
+    });
+
+    if (!userOrg) {
+      throw new ShelfError({
+        cause: null,
+        message: "User is not a member of this organization",
+        additionalData: { userId, organizationId },
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    return await client.userOrganization.update({
+      where: { userId_organizationId: { userId, organizationId } },
+      data: { membershipCheckExempt: exempt },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to update the membership exemption",
+      additionalData: { userId, organizationId, exempt },
+      label,
+    });
+  }
+}
+
 export async function changeUserRole({
   userId,
   organizationId,

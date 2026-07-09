@@ -32,8 +32,17 @@ import { mapAuthSession } from "~/modules/auth/mappers.server";
 import { createUserOrAttachOrg } from "~/modules/user/service.server";
 import { NEON_MEMBER_ORG_ID, SESSION_SECRET } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
 const label = "Neon Auth" as const;
+
+/**
+ * The member-facing message shown wherever the active-Neon-membership check
+ * fails — at social/email signup and when a member tries to reserve without an
+ * active membership. Points them to renew or reach out to staff.
+ */
+export const MEMBERSHIP_REQUIRED_MESSAGE =
+  "We couldn't verify an active BIG membership for this account. If you think this is a mistake, email jessica@brooklineinteractive.org — or sign up for a BIG Membership at https://brooklineinteractive.app.neoncrm.com/forms/membership.";
 
 /** How long a Neon OAuth `state` token is valid — one login round-trip. */
 const STATE_TTL_SECONDS = 60 * 10;
@@ -222,9 +231,8 @@ export async function assertActiveNeonMemberForSignup(
   if (!member || !member.isActiveMember) {
     throw new ShelfError({
       cause: null,
-      title: "Membership required",
-      message:
-        "We couldn't find an active membership for that email. Members sign up with the email on file in Neon CRM. If you think this is a mistake, please contact us.",
+      title: "Active membership required",
+      message: MEMBERSHIP_REQUIRED_MESSAGE,
       label,
       status: 403,
       shouldBeCaptured: false,
@@ -256,4 +264,79 @@ export async function linkNeonAccountByEmail(email: string): Promise<void> {
   } catch {
     // Best-effort — swallow. Linking can be retried on the next Neon login/sync.
   }
+}
+
+/**
+ * Reservation gate. A MEMBER may reserve only when they are either
+ * (a) exempt from the membership check — an admin-invited non-Neon user
+ * (volunteer, partner) whose `UserOrganization.membershipCheckExempt` is set —
+ * or (b) a currently ACTIVE Neon member. Non-MEMBER roles (staff) are never
+ * gated here.
+ *
+ * Enforced independently of how they logged in (Google, email, Neon, SSO), so a
+ * lapsed member can't keep reserving. Fails OPEN if the Neon API is unreachable
+ * (a Neon outage must not block reservations) but fails CLOSED on a definitive
+ * "not an active member".
+ *
+ * @param args.userId - The reserving user (the booking's creator)
+ * @param args.organizationId - The workspace the reservation is in
+ * @throws {ShelfError} 403 when a non-exempt MEMBER has no active Neon membership
+ */
+export async function assertMemberCanReserve({
+  userId,
+  organizationId,
+}: {
+  userId: string;
+  organizationId: string;
+}): Promise<void> {
+  const membership = await db.userOrganization.findFirst({
+    where: { userId, organizationId },
+    select: {
+      roles: true,
+      membershipCheckExempt: true,
+      user: { select: { email: true } },
+    },
+  });
+
+  // Not a member of this workspace, or not a MEMBER (staff/admin) → not our gate.
+  if (!membership || !membership.roles.includes(OrganizationRoles.MEMBER)) {
+    return;
+  }
+  // Admin-exempted non-Neon member (volunteer/partner) → always allowed.
+  if (membership.membershipCheckExempt) {
+    return;
+  }
+  // Neon not configured (e.g. local dev before creds are wired) → don't block.
+  if (!isNeonApiConfigured()) {
+    return;
+  }
+
+  try {
+    const member = await resolveNeonMemberByEmail(membership.user.email);
+    if (member?.isActiveMember) {
+      return; // active Neon member → allowed
+    }
+  } catch (cause) {
+    // Neon unreachable → fail OPEN so an outage doesn't block reservations.
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Neon membership check failed at reservation time; allowing the reservation (fail-open).",
+        additionalData: { userId, organizationId },
+        label,
+      })
+    );
+    return;
+  }
+
+  // Definitive: no active Neon membership and not exempt → block.
+  throw new ShelfError({
+    cause: null,
+    title: "Active membership required",
+    message: MEMBERSHIP_REQUIRED_MESSAGE,
+    label,
+    status: 403,
+    shouldBeCaptured: false,
+  });
 }

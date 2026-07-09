@@ -24,6 +24,7 @@ function mockUserOrg(roles: OrganizationRoles[]) {
     userId: USER_ID,
     organizationId: ORG_ID,
     roles,
+    membershipCheckExempt: false,
     createdAt: new Date(),
     updatedAt: new Date(),
   });
@@ -35,6 +36,7 @@ function mockUpdateSuccess(newRole: OrganizationRoles) {
     userId: USER_ID,
     organizationId: ORG_ID,
     roles: [newRole],
+    membershipCheckExempt: false,
     createdAt: new Date(),
     updatedAt: new Date(),
   });

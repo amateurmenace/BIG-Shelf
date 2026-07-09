@@ -26,10 +26,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     await assertUserCanInviteUsersToWorkspace({ organizationId });
 
-    const { email, teamMemberId, role, inviteMessage } = parseData(
-      await request.formData(),
-      InviteUserFormSchema
-    );
+    const { email, teamMemberId, role, inviteMessage, membershipCheckExempt } =
+      parseData(await request.formData(), InviteUserFormSchema);
 
     let teamMemberName = email.split("@")[0];
 
@@ -80,6 +78,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       teamMemberId,
       userId,
       extraMessage: inviteMessage,
+      membershipCheckExempt,
     });
 
     if (!invite) {

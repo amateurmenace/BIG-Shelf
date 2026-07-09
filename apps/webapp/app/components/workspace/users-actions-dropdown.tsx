@@ -34,6 +34,7 @@ export function TeamUsersActionsDropdown({
   customTrigger,
   role,
   roleEnum,
+  membershipCheckExempt,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
@@ -44,6 +45,8 @@ export function TeamUsersActionsDropdown({
   customTrigger?: (disabled: boolean) => ReactNode;
   role: UserFriendlyRoles;
   roleEnum: OrganizationRoles;
+  /** BIG: current exemption state; only present (and toggle shown) for MEMBERs. */
+  membershipCheckExempt?: boolean;
 }) {
   const fetcher = useFetcher();
   const disabled = useDisabled(fetcher);
@@ -186,6 +189,33 @@ export function TeamUsersActionsDropdown({
                     <RemoveUserIcon /> Revoke access
                   </span>
                 </Button>
+                {/* BIG: toggle the Neon membership requirement for this member.
+                    Only meaningful for MEMBER role (it gates the /reserve flow). */}
+                {roleEnum === OrganizationRoles.MEMBER &&
+                membershipCheckExempt !== undefined ? (
+                  <>
+                    <input
+                      type="hidden"
+                      name="exempt"
+                      value={String(!membershipCheckExempt)}
+                    />
+                    <Button
+                      type="submit"
+                      variant="link"
+                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
+                      width="full"
+                      name="intent"
+                      value="setMembershipExempt"
+                      disabled={disabled}
+                    >
+                      <span className="flex items-center gap-2">
+                        {membershipCheckExempt
+                          ? "Require Neon membership"
+                          : "Exempt from membership"}
+                      </span>
+                    </Button>
+                  </>
+                ) : null}
               </>
             ) : null}
           </fetcher.Form>
