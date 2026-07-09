@@ -15,9 +15,15 @@
  * @see {@link file://../location/service.server.ts} — `updateLocationAssets`, the model for `updateRoomAssets`
  */
 
+import { createId } from "@paralleldrive/cuid2";
 import type { Asset, Organization, Prisma, Room, User } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import {
+  DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+  PUBLIC_BUCKET,
+} from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -29,6 +35,7 @@ import {
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
+import { parseFileFormData } from "~/utils/storage.server";
 import type { MergeInclude } from "~/utils/utils";
 import { GET_ROOM_STATIC_INCLUDES, ROOMS_INCLUDE_FIELDS } from "./types";
 import type { UpdateRoomPayload } from "./types";
@@ -51,17 +58,23 @@ export async function createRoom({
   name,
   description,
   color,
+  imageUrl,
+  imagePath,
   createdById,
   organizationId,
 }: Pick<Room, "name" | "organizationId" | "createdById"> & {
   description?: Room["description"];
   color?: Room["color"];
+  imageUrl?: Room["imageUrl"];
+  imagePath?: Room["imagePath"];
 }) {
   try {
     const data: Prisma.RoomCreateInput = {
       name,
       description,
       color,
+      imageUrl,
+      imagePath,
       createdBy: { connect: { id: createdById } },
       organization: { connect: { id: organizationId } },
     };
@@ -230,6 +243,8 @@ export async function updateRoom({
   description,
   color,
   status,
+  imageUrl,
+  imagePath,
 }: UpdateRoomPayload) {
   try {
     const data: Prisma.RoomUpdateInput = {
@@ -237,6 +252,10 @@ export async function updateRoom({
       description,
       color,
       status,
+      // Only patch the photo when the caller supplies it (undefined = leave as
+      // is; a value replaces it). Callers that clear a photo pass null.
+      ...(imageUrl !== undefined ? { imageUrl } : {}),
+      ...(imagePath !== undefined ? { imagePath } : {}),
     };
 
     return await db.room.update({
@@ -246,6 +265,149 @@ export async function updateRoom({
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Room", {
       additionalData: { id, organizationId },
+    });
+  }
+}
+
+/**
+ * Uploads (or replaces) a room's photo from a multipart request and stores it
+ * on the room. The image goes to the PUBLIC bucket (public URL, no signed-URL
+ * expiration to manage), resized to 1600px wide — the recommended room-photo
+ * width. On a successful replace, the previous file is removed best-effort.
+ *
+ * SECURITY: org-scoped — the room is looked up and updated by
+ * `{ id, organizationId }`, so a foreign room id can never be photographed or
+ * read across tenants.
+ *
+ * @param args.request - The incoming multipart POST (carries the `image` file)
+ * @param args.roomId - The target room (from the route param, untrusted)
+ * @param args.organizationId - The caller's validated organization
+ * @returns The updated Room record
+ * @throws {ShelfError} 404 if the room isn't in this org, 400 if no image was
+ *   provided, 500 on upload/db failure
+ */
+export async function updateRoomPhotoFromRequest({
+  request,
+  roomId,
+  organizationId,
+}: {
+  request: Request;
+  roomId: Room["id"];
+  organizationId: Organization["id"];
+}): Promise<Room> {
+  try {
+    // Prove the room is in this org first (IDOR guard) and grab the current
+    // photo path so we can clean it up after a successful replace.
+    const existing = await db.room.findFirst({
+      where: { id: roomId, organizationId },
+      select: { imagePath: true },
+    });
+    if (!existing) {
+      throw new ShelfError({
+        cause: null,
+        title: "Room not found",
+        message: "That room no longer exists in this workspace.",
+        additionalData: { roomId, organizationId },
+        status: 404,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const imagePathBase = `${organizationId}/rooms/${createId()}`;
+    const formData = await parseFileFormData({
+      request,
+      bucketName: PUBLIC_BUCKET,
+      newFileName: imagePathBase,
+      // Room photos render up to ~full-column width on the booking form; 1600px
+      // covers that at 2x retina. Public bucket, so no thumbnail needed.
+      resizeOptions: { width: 1600, withoutEnlargement: true },
+      maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+    });
+
+    const imagePath = formData.get("image") as string | null;
+    if (!imagePath) {
+      throw new ShelfError({
+        cause: null,
+        message: "Please choose a photo to upload.",
+        additionalData: { roomId, organizationId },
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const {
+      data: { publicUrl: imageUrl },
+    } = getSupabaseAdmin().storage.from(PUBLIC_BUCKET).getPublicUrl(imagePath);
+
+    const room = await db.room.update({
+      where: { id: roomId, organizationId },
+      data: { imageUrl, imagePath },
+    });
+
+    // Best-effort remove the replaced file — a leftover must never block.
+    if (existing.imagePath && existing.imagePath !== imagePath) {
+      await getSupabaseAdmin()
+        .storage.from(PUBLIC_BUCKET)
+        .remove([existing.imagePath])
+        .catch(() => null);
+    }
+
+    return room;
+  } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while uploading the room photo",
+      additionalData: { roomId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Clears a room's photo (org-scoped) and best-effort removes the stored file.
+ *
+ * @param args.roomId - The target room (from the route param, untrusted)
+ * @param args.organizationId - The caller's validated organization
+ * @returns The updated Room record
+ * @throws {ShelfError} On database failure
+ */
+export async function removeRoomPhoto({
+  roomId,
+  organizationId,
+}: {
+  roomId: Room["id"];
+  organizationId: Organization["id"];
+}): Promise<Room> {
+  try {
+    const existing = await db.room.findFirst({
+      where: { id: roomId, organizationId },
+      select: { imagePath: true },
+    });
+
+    const room = await db.room.update({
+      where: { id: roomId, organizationId },
+      data: { imageUrl: null, imagePath: null },
+    });
+
+    if (existing?.imagePath) {
+      await getSupabaseAdmin()
+        .storage.from(PUBLIC_BUCKET)
+        .remove([existing.imagePath])
+        .catch(() => null);
+    }
+
+    return room;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while removing the room photo",
+      additionalData: { roomId, organizationId },
+      label,
     });
   }
 }

@@ -86,6 +86,8 @@ export type RoomWithSchedule = {
   name: string;
   description: string | null;
   color: string;
+  /** Public URL of the room photo, or null when none is set. */
+  imageUrl: string | null;
   assetCount: number;
   availability: RoomAvailabilityStatus;
   /** Active reservation windows within [now, now + horizonDays], sorted by start. */
@@ -152,6 +154,7 @@ export async function getRoomsWithSchedule({
         name: true,
         description: true,
         color: true,
+        imageUrl: true,
         _count: { select: { assets: true } },
         bookings: {
           where: {
@@ -203,6 +206,7 @@ export async function getRoomsWithSchedule({
         name: room.name,
         description: room.description,
         color: room.color ?? DEFAULT_ROOM_COLOR,
+        imageUrl: room.imageUrl,
         assetCount: room._count.assets,
         availability,
         busyWindows,

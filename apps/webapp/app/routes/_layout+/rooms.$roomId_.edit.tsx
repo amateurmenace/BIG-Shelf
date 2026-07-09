@@ -31,8 +31,14 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import RoomForm, { RoomFormSchema } from "~/components/rooms/room-form";
+import { RoomPhotoUpload } from "~/components/rooms/room-photo-upload";
 import { Button } from "~/components/shared/button";
-import { getRoom, updateRoom } from "~/modules/room/service.server";
+import {
+  getRoom,
+  removeRoomPhoto,
+  updateRoom,
+  updateRoomPhotoFromRequest,
+} from "~/modules/room/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -127,7 +133,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    // Photo upload posts as multipart — branch BEFORE consuming the body
+    // (parseFileFormData reads the stream). It stays on the edit page so the
+    // new photo is visible immediately.
+    const contentType = request.headers.get("content-type") ?? "";
+    if (contentType.includes("multipart/form-data")) {
+      await updateRoomPhotoFromRequest({ request, roomId, organizationId });
+      sendNotification({
+        title: "Room photo updated",
+        message: "The room photo has been saved.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+      return redirect(`/rooms/${roomId}/edit`);
+    }
+
     const formData = await request.formData();
+
+    // The small "Remove photo" form clears the photo and stays on the edit page.
+    if (formData.get("intent") === "remove-photo") {
+      await removeRoomPhoto({ roomId, organizationId });
+      sendNotification({
+        title: "Room photo removed",
+        message: "The room photo has been removed.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+      return redirect(`/rooms/${roomId}/edit`);
+    }
 
     const parsedData = parseData(formData, RoomFormSchema, {
       additionalData: { userId, roomId, organizationId },
@@ -175,7 +208,8 @@ export default function RoomEdit() {
         }
       />
 
-      <div className="items-top flex justify-between">
+      <div className="flex w-full max-w-screen-sm flex-col gap-8">
+        <RoomPhotoUpload imageUrl={room.imageUrl} roomName={room.name} />
         <RoomForm
           name={room.name}
           description={room.description}

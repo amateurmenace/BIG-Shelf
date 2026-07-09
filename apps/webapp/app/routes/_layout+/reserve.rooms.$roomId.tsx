@@ -353,6 +353,15 @@ export default function MemberRoomBookingPage() {
         {/* Room identity card */}
         <div className="flex flex-col gap-4">
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+            {room.imageUrl ? (
+              <div className="aspect-video w-full overflow-hidden bg-gray-50">
+                <img
+                  src={room.imageUrl}
+                  alt={room.name}
+                  className="size-full object-cover"
+                />
+              </div>
+            ) : null}
             <div
               className="h-1.5 w-full"
               style={{ backgroundColor: room.color }}

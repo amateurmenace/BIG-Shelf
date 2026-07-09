@@ -30,6 +30,8 @@ export type ClientRoomSchedule = {
   name: string;
   description: string | null;
   color: string;
+  /** Public URL of the room photo, or null when none is set. */
+  imageUrl: string | null;
   assetCount: number;
   availability: { state: "free" | "busy"; until: string | Date | null };
   busyWindows: ClientBusyWindow[];

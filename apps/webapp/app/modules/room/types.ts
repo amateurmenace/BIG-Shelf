@@ -20,7 +20,10 @@ import type { Prisma, Room } from "@prisma/client";
  * without clobbering the rest of the record.
  */
 export type UpdateRoomPayload = Partial<
-  Pick<Room, "name" | "description" | "color" | "status">
+  Pick<
+    Room,
+    "name" | "description" | "color" | "status" | "imageUrl" | "imagePath"
+  >
 > & {
   id: Room["id"];
   organizationId: Room["organizationId"];

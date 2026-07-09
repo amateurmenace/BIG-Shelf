@@ -305,28 +305,6 @@ export default function MemberHomeDashboard() {
           </Link>
         </div>
 
-        {/* Interactive room schedule — the kiosk board, app-styled. Free
-            slots deep-link into the booking form with the time prefilled. */}
-        {rooms.length > 0 ? (
-          <div className="rounded-lg border border-gray-200 bg-white p-4 md:p-6">
-            <div className="mb-3">
-              <h2 className="text-sm font-semibold text-gray-900">
-                Book a room by time
-              </h2>
-              <p className="mt-0.5 text-xs text-gray-500">
-                Pick a day, then tap any open slot to start a reservation.
-              </p>
-            </div>
-            <ClientOnly
-              fallback={
-                <div className="h-48 animate-pulse rounded-lg bg-gray-100" />
-              }
-            >
-              {() => <DayScheduleBoard rooms={rooms} closedDays={closedDays} />}
-            </ClientOnly>
-          </div>
-        ) : null}
-
         {/* Coming up */}
         <div className="rounded-lg border border-gray-200 bg-white">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 md:px-6">
@@ -422,6 +400,29 @@ export default function MemberHomeDashboard() {
             those items free up.{" "}
             <span className="font-medium text-primary-700">Manage</span>
           </Link>
+        ) : null}
+
+        {/* Interactive room schedule — the kiosk board, app-styled. Free slots
+            deep-link into the booking form with the time prefilled. Placed lower
+            so the member's own content (reservations, classes) leads the page. */}
+        {rooms.length > 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-4 md:p-6">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold text-gray-900">
+                Book a room by time
+              </h2>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Pick a day, then tap any open slot to start a reservation.
+              </p>
+            </div>
+            <ClientOnly
+              fallback={
+                <div className="h-48 animate-pulse rounded-lg bg-gray-100" />
+              }
+            >
+              {() => <DayScheduleBoard rooms={rooms} closedDays={closedDays} />}
+            </ClientOnly>
+          </div>
         ) : null}
 
         {/* Embedded availability calendar (month/week + closed-day shading) */}

@@ -15,6 +15,7 @@
  * @see {@link file://./../../modules/big-waitlist/service.server.ts} — waitlist logic
  */
 import { AssetStatus } from "@prisma/client";
+import { PackageIcon } from "lucide-react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -27,6 +28,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
+import { refreshExpiredAssetImages } from "~/modules/asset/service.server";
 import { requireMemberPortalAccess } from "~/modules/big-member/service.server";
 import {
   cancelWaitlistEntry,
@@ -37,6 +39,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { error, payload } from "~/utils/http.server";
 import { PermissionAction } from "~/utils/permissions/permission.data";
+import { tw } from "~/utils/tw";
 
 /** Equipment cards per catalog page. */
 const EQUIPMENT_PER_PAGE = 24;
@@ -94,6 +97,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             id: true,
             title: true,
             status: true,
+            // Image fields power the catalog card photo; organizationId +
+            // mainImageExpiration let us re-sign expired URLs below.
+            organizationId: true,
+            mainImage: true,
+            thumbnailImage: true,
+            mainImageExpiration: true,
             category: { select: { name: true, color: true } },
           },
           orderBy: [{ status: "asc" }, { title: "asc" }],
@@ -104,8 +113,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         getMemberWaitlist({ organizationId, userId }),
       ]);
 
+    // Re-sign any expired Supabase signed URLs server-side so catalog photos
+    // never 404 (render-stability rule: fix image URLs in the loader).
+    const equipmentWithImages = await refreshExpiredAssetImages(equipment);
+
+    // Assets the member already holds an ACTIVE waitlist entry for — WAITING or
+    // NOTIFIED. Including NOTIFIED means an item that got re-taken while the
+    // member was notified shows "On waitlist" (not "Join waitlist"), so the card
+    // can't create a second, duplicate entry.
     const waitlistedAssetIds = waitlist
-      .filter((entry) => String(entry.status) === "WAITING")
+      .filter((entry) => ["WAITING", "NOTIFIED"].includes(String(entry.status)))
       .map((entry) => entry.asset?.id)
       .filter((id): id is string => Boolean(id));
 
@@ -120,7 +137,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       payload({
         header,
         availableCount,
-        equipment,
+        equipment: equipmentWithImages,
         search,
         page,
         totalPages,
@@ -185,6 +202,41 @@ export const handle = {
   breadcrumb: () => <Link to="/reserve/equipment">Reserve equipment</Link>,
   name: "reserve.equipment",
 };
+
+/**
+ * The equipment card's photo (or a placeholder). The image zooms gently on
+ * hover (the card is the `group`); taken items are dimmed so availability reads
+ * at a glance.
+ *
+ * @param props.image - The asset's photo URL (mainImage, falling back to
+ *   thumbnail), or null when the asset has none
+ * @param props.available - Whether the item is currently available
+ */
+function EquipmentImage({
+  image,
+  available,
+}: {
+  image: string | null;
+  available: boolean;
+}) {
+  if (!image) {
+    return (
+      <div className="flex size-full items-center justify-center text-gray-300">
+        <PackageIcon className="size-10" aria-hidden />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={image}
+      alt=""
+      className={tw(
+        "size-full object-cover transition-transform duration-300 ease-out group-hover:scale-105",
+        !available && "opacity-75"
+      )}
+    />
+  );
+}
 
 /** Builds a catalog query string, preserving the search term across pages. */
 function catalogHref(search: string, page: number): string {
@@ -256,71 +308,92 @@ export default function ReserveEquipmentCatalog() {
                 : "No equipment to show right now."}
             </div>
           ) : (
-            <ul className="grid grid-cols-1 gap-px bg-gray-100 sm:grid-cols-2 lg:grid-cols-3">
-              {equipment.map((item) => (
-                <li
-                  key={item.id}
-                  className="flex items-center justify-between gap-3 bg-white p-4"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-gray-900">
-                      {item.title}
-                    </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <ul className="grid grid-cols-2 gap-4 p-4 md:p-6 lg:grid-cols-3 xl:grid-cols-4">
+              {equipment.map((item) => {
+                const image = item.mainImage ?? item.thumbnailImage;
+                const isAvailable = item.status === "AVAILABLE";
+                const onWaitlist = waitlistedAssetIds.includes(item.id);
+                const reservePath = `/assets/${item.id}/overview/create-new-booking`;
+                return (
+                  <li
+                    key={item.id}
+                    className="group flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-lg"
+                  >
+                    {/* Photo — links straight into the reserve flow when free */}
+                    {isAvailable ? (
+                      <Link
+                        to={reservePath}
+                        className="relative block aspect-[4/3] overflow-hidden bg-gray-50"
+                        aria-label={`Reserve ${item.title}`}
+                      >
+                        <EquipmentImage image={image} available={isAvailable} />
+                      </Link>
+                    ) : (
+                      <div className="relative aspect-[4/3] overflow-hidden bg-gray-50">
+                        <EquipmentImage image={image} available={isAvailable} />
+                        <span className="absolute left-2 top-2 rounded-full bg-gray-900/70 px-2 py-0.5 text-xs font-medium text-white backdrop-blur">
+                          {ASSET_STATUS_LABEL[item.status] ?? "Unavailable"}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex flex-1 flex-col gap-2 p-3 md:p-4">
+                      <p className="line-clamp-2 text-sm font-medium text-gray-900">
+                        {item.title}
+                      </p>
                       {item.category ? (
                         <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
                           <span
-                            className="inline-block size-2 rounded-full"
+                            className="inline-block size-2 shrink-0 rounded-full"
                             style={{
                               backgroundColor: item.category.color ?? "#9ca3af",
                             }}
                           />
-                          {item.category.name}
+                          <span className="truncate">{item.category.name}</span>
                         </span>
                       ) : (
                         <span className="text-xs text-gray-400">
                           Uncategorized
                         </span>
                       )}
-                      {item.status !== "AVAILABLE" ? (
-                        <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
-                          {ASSET_STATUS_LABEL[item.status] ?? "Unavailable"}
-                        </span>
-                      ) : null}
+
+                      <div className="mt-auto pt-2">
+                        {isAvailable ? (
+                          <Button to={reservePath} size="sm" width="full">
+                            Reserve
+                          </Button>
+                        ) : onWaitlist ? (
+                          <span className="block rounded border border-gray-200 py-1.5 text-center text-xs font-medium text-gray-500">
+                            On waitlist
+                          </span>
+                        ) : (
+                          <Form method="post">
+                            <input
+                              type="hidden"
+                              name="intent"
+                              value="join-waitlist"
+                            />
+                            <input
+                              type="hidden"
+                              name="assetId"
+                              value={item.id}
+                            />
+                            <Button
+                              type="submit"
+                              variant="secondary"
+                              size="sm"
+                              width="full"
+                              disabled={disabled}
+                            >
+                              Join waitlist
+                            </Button>
+                          </Form>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  {item.status === "AVAILABLE" ? (
-                    <Button
-                      to={`/assets/${item.id}/overview/create-new-booking`}
-                      variant="secondary"
-                      size="sm"
-                    >
-                      Reserve
-                    </Button>
-                  ) : waitlistedAssetIds.includes(item.id) ? (
-                    <span className="shrink-0 rounded border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500">
-                      On waitlist
-                    </span>
-                  ) : (
-                    <Form method="post" className="shrink-0">
-                      <input
-                        type="hidden"
-                        name="intent"
-                        value="join-waitlist"
-                      />
-                      <input type="hidden" name="assetId" value={item.id} />
-                      <Button
-                        type="submit"
-                        variant="secondary"
-                        size="sm"
-                        disabled={disabled}
-                      >
-                        Join waitlist
-                      </Button>
-                    </Form>
-                  )}
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
 

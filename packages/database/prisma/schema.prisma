@@ -1487,6 +1487,12 @@ model Room {
   color       String?
   status      RoomStatus @default(AVAILABLE)
 
+  // Optional room photo shown on the member room picker + booking form. Stored
+  // in the PUBLIC bucket (BIG-only, additive) as a public URL + storage path,
+  // mirroring the KioskPromo image pattern — no signed-URL expiration to manage.
+  imageUrl  String?
+  imagePath String?
+
   // Equipment assigned to this room. Mirrors Asset.locationId / Asset.kitId: an
   // asset belongs to at most one room. roomId is set null on room delete.
   assets Asset[]
