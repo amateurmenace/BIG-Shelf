@@ -1,10 +1,18 @@
 /**
  * Member Home Dashboard — `/reserve`
  *
- * The landing page for BIG members: a warm greeting, two big actions
- * ("Reserve equipment" / "Book a room"), the member's upcoming reservations,
- * and an expandable room-availability calendar (anonymized — members see WHEN
- * rooms are taken, never WHO booked them).
+ * The landing page for BIG members, sharing the kiosk wallboard's content and
+ * interaction patterns restyled for the light in-app theme (members are
+ * mostly on phones): a warm greeting, the admin-authored rotating news
+ * banner, two big actions ("Reserve equipment" / "Book a room"), an
+ * interactive 7-day room schedule whose free slots deep-link into the booking
+ * form with the time prefilled, the member's upcoming reservations, the
+ * kiosk's class/event promos as tappable links, and an embedded month/week
+ * availability calendar with closed days shaded.
+ *
+ * PRIVACY: every schedule surface is anonymized — members see WHEN rooms are
+ * taken, never WHO booked them (`getRoomsWithSchedule` without
+ * `includeDetails`, `getRoomAvailability`).
  *
  * Members arrive here on login via the `home.tsx` MEMBER redirect. The
  * equipment catalog and the room booking flow live on sibling routes:
@@ -12,14 +20,20 @@
  * @see {@link file://./reserve.tsx} — the section layout + shared gate
  * @see {@link file://./reserve.equipment.tsx} — browse + reserve equipment
  * @see {@link file://./reserve.rooms._index.tsx} — the room picker
- * @see {@link file://./../../modules/big-room-booking/service.server.ts} — room schedules
+ * @see {@link file://./reserve.rooms.$roomId.tsx} — the booking form (?start= prefill)
+ * @see {@link file://./../kiosk.tsx} — the dark wallboard twin of this page
+ * @see {@link file://./../../modules/big-kiosk-content/service.server.ts} — news/promos/closed days
  */
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { DoorOpenIcon, VideoIcon } from "lucide-react";
 import { DateTime } from "luxon";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, Link, useLoaderData } from "react-router";
-import { ExpandableRoomCalendar } from "~/components/big/room-booking/expandable-room-calendar";
+import { ClientOnly } from "remix-utils/client-only";
+import { MemberNewsBanner } from "~/components/big/reserve/news-banner";
+import { PromoCardLink } from "~/components/big/reserve/promo-card-link";
+import { DayScheduleBoard } from "~/components/big/room-booking/day-schedule-board";
+import { RoomAvailabilityCalendar } from "~/components/big/room-booking/room-availability-calendar";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -28,6 +42,12 @@ import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
+import {
+  getKioskClosedDays,
+  getKioskConfig,
+  getKioskPromos,
+  splitKioskNews,
+} from "~/modules/big-kiosk-content/service.server";
 import {
   getRoomAvailability,
   requireMemberPortalAccess,
@@ -55,8 +75,9 @@ const ACTIVE_RESERVATION_STATUSES: BookingStatus[] = [
 
 /**
  * Loads everything the dashboard shows: greeting inputs, action-card counts,
- * the member's next reservations, waitlist size, and room schedules for the
- * calendar widget. All queries are org-scoped; reservations/waitlist are
+ * the member's next reservations, waitlist size, room schedules for the
+ * interactive board, and the kiosk's shared content (news lines, promos,
+ * closed days). All queries are org-scoped; reservations/waitlist are
  * additionally scoped to the caller's own user id.
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -87,6 +108,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalReservations,
       rooms,
       waitlist,
+      promos,
+      kioskConfig,
+      closedDays,
     ] = await Promise.all([
       db.user.findUnique({
         where: { id: userId },
@@ -127,9 +151,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // Anonymized: no booking/custodian names reach the member's browser.
       getRoomsWithSchedule({ organizationId, horizonDays: 7 }),
       getMemberWaitlist({ organizationId, userId }),
+      // The kiosk's admin-managed content, shared with the member dashboard.
+      getKioskPromos({ organizationId }),
+      getKioskConfig({ organizationId }),
+      getKioskClosedDays({ organizationId }),
     ]);
 
-    // Events for the expanded month/week calendar (also anonymized).
+    // Events for the embedded month/week calendar (also anonymized).
     const roomAvailability = await getRoomAvailability({ organizationId });
 
     const freeNowCount = rooms.filter(
@@ -153,6 +181,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         freeNowCount,
         waitlistCount,
         roomEvents: roomAvailability.events,
+        // Tight-mapped: only what the promo cards render.
+        promos: promos.map((promo) => ({
+          id: promo.id,
+          title: promo.title,
+          eventDate: promo.eventDate,
+          linkUrl: promo.linkUrl,
+          imageUrl: promo.imageUrl,
+        })),
+        newsMessages: splitKioskNews(kioskConfig?.newsMessages),
+        closedDays,
       })
     );
   } catch (cause) {
@@ -173,8 +211,9 @@ export const handle = {
 };
 
 /**
- * The dashboard: greeting hero, action cards, coming-up list, waitlist
- * teaser, and the expandable availability calendar.
+ * The dashboard: news banner, greeting hero, action cards, the interactive
+ * day-schedule board, coming-up list, promo cards, waitlist teaser, and the
+ * embedded availability calendar.
  */
 export default function MemberHomeDashboard() {
   const {
@@ -187,6 +226,9 @@ export default function MemberHomeDashboard() {
     freeNowCount,
     waitlistCount,
     roomEvents,
+    promos,
+    newsMessages,
+    closedDays,
   } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const justBooked = searchParams.get("booked") === "1";
@@ -206,6 +248,9 @@ export default function MemberHomeDashboard() {
             on its way.
           </div>
         ) : null}
+
+        {/* Rotating news banner — same admin-authored lines as the kiosk */}
+        <MemberNewsBanner messages={newsMessages} />
 
         {/* Greeting hero */}
         <div className="rounded-lg border border-gray-200 bg-gradient-to-r from-primary-25 to-white p-5 md:p-6">
@@ -259,6 +304,28 @@ export default function MemberHomeDashboard() {
             </span>
           </Link>
         </div>
+
+        {/* Interactive room schedule — the kiosk board, app-styled. Free
+            slots deep-link into the booking form with the time prefilled. */}
+        {rooms.length > 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-4 md:p-6">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold text-gray-900">
+                Book a room by time
+              </h2>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Pick a day, then tap any open slot to start a reservation.
+              </p>
+            </div>
+            <ClientOnly
+              fallback={
+                <div className="h-48 animate-pulse rounded-lg bg-gray-100" />
+              }
+            >
+              {() => <DayScheduleBoard rooms={rooms} closedDays={closedDays} />}
+            </ClientOnly>
+          </div>
+        ) : null}
 
         {/* Coming up */}
         <div className="rounded-lg border border-gray-200 bg-white">
@@ -330,6 +397,20 @@ export default function MemberHomeDashboard() {
           ) : null}
         </div>
 
+        {/* Classes & events — the kiosk promos as tappable sign-up links */}
+        {promos.length > 0 ? (
+          <div>
+            <h2 className="mb-3 text-sm font-semibold text-gray-900">
+              Classes &amp; events
+            </h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {promos.map((promo) => (
+                <PromoCardLink key={promo.id} promo={promo} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* Waitlist teaser */}
         {waitlistCount > 0 ? (
           <Link
@@ -343,19 +424,29 @@ export default function MemberHomeDashboard() {
           </Link>
         ) : null}
 
-        {/* Availability calendar widget */}
-        <div className="rounded-lg border border-gray-200 bg-white p-4 md:p-6">
-          <div className="mb-3">
-            <h2 className="text-sm font-semibold text-gray-900">
-              When are rooms free?
-            </h2>
-            <p className="mt-0.5 text-xs text-gray-500">
-              The next 7 days per room — darker bars mean busier days. Expand
-              for the full month.
-            </p>
+        {/* Embedded availability calendar (month/week + closed-day shading) */}
+        {rooms.length > 0 ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-4 md:p-6">
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold text-gray-900">
+                Room availability
+              </h2>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Colored blocks show when a room is reserved — open slots are
+                free to book. Red-shaded days are when BIG is closed.
+              </p>
+            </div>
+            <RoomAvailabilityCalendar
+              rooms={rooms}
+              events={roomEvents}
+              closedDays={closedDays}
+            />
           </div>
-          <ExpandableRoomCalendar rooms={rooms} events={roomEvents} />
-        </div>
+        ) : (
+          <p className="text-sm text-gray-600">
+            No rooms have been set up yet.
+          </p>
+        )}
       </div>
     </div>
   );

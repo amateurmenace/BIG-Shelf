@@ -24,14 +24,20 @@ additions on top of upstream's changes.
   mapping.
 - **Member self-service portal** (`/reserve`) — the MEMBER landing surface, a
   small multi-page app: a **home dashboard** (`reserve._index` — greeting, big
-  "Reserve equipment" / "Book a room" actions, upcoming reservations, and an
-  expandable room-availability calendar that is **anonymized**: members see
-  when rooms are taken, never who), an equipment catalog + waitlist
+  "Reserve equipment" / "Book a room" actions, upcoming reservations, plus the
+  kiosk's shared content restyled for the light app theme: the rotating news
+  banner, class/event promos as tappable links (not QR), an interactive 7-day
+  day-picker + per-room hour timelines whose free slots deep-link to
+  `reserve.rooms.$roomId?start=…` prefilled, and an embedded month/week
+  FullCalendar with closed days shaded — all **anonymized**: members see when
+  rooms are taken, never who), an equipment catalog + waitlist
   (`reserve.equipment`), and the room-booking flow (`reserve.rooms._index`
-  picker + `reserve.rooms.$roomId` form). Additive: `app/modules/big-member/`,
-  `app/routes/_layout+/reserve*.tsx`. Core edits: the `home.tsx`
-  MEMBER→`/reserve` redirect and the sidebar nav hook (members get a focused
-  Home / Reserve equipment / Book a room / My reservations nav).
+  picker + `reserve.rooms.$roomId` form, which validates/clamps the `?start=`
+  deep-link param server-side). Additive: `app/modules/big-member/`,
+  `app/routes/_layout+/reserve*.tsx`, `app/components/big/reserve/`. Core
+  edits: the `home.tsx` MEMBER→`/reserve` redirect and the sidebar nav hook
+  (members get a focused Home / Reserve equipment / Book a room / My
+  reservations nav).
 - **Room booking flow + week-ahead digest + kiosk wallboard** — a dedicated
   "book a room" pipeline (`app/modules/big-room-booking/`) that composes
   upstream `createBooking` → `updateBookingRooms` → `reserveBooking` (so the

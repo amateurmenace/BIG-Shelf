@@ -12,6 +12,10 @@
  * server-side). Staff previewing this page books for themself too — the staff
  * flow with a custodian picker lives at `/rooms/:roomId/book`.
  *
+ * Supports a `?start=yyyy-MM-ddTHH:mm` deep-link param (the dashboard's
+ * day-schedule board taps) that prefills the form — validated and clamped
+ * server-side in the viewer's timezone.
+ *
  * @see {@link file://./../../components/big/room-booking/room-booking-form.tsx} — the shared form
  * @see {@link file://./../../modules/big-room-booking/service.server.ts}
  */
@@ -51,9 +55,85 @@ import { PermissionAction } from "~/utils/permissions/permission.data";
 const paramsSchema = z.object({ roomId: z.string() });
 
 /**
+ * Matches the `?start=` deep-link param (a `datetime-local` wire string) sent
+ * by the dashboard's day-schedule board when a member taps a free slot.
+ */
+const START_PARAM_FORMAT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+/** How far ahead a `?start=` deep link may point (matches the schedule horizon). */
+const START_PARAM_HORIZON_DAYS = 60;
+
+/**
+ * Resolves the form's default start/end from an optional `?start=` deep-link
+ * param, validated and clamped server-side in the viewer's timezone (so SSR
+ * and hydration agree):
+ * - no/invalid/too-far param → the standard default (next full hour clearing
+ *   the org's start-time buffer, 2 hours long);
+ * - a valid slot → that time, 1 hour long (the tapped slot's length);
+ * - a slot that has passed or sits inside the buffer → clamped forward to the
+ *   next quarter-hour a booking may start, flagged via `startAdjusted` so the
+ *   page can tell the member their time moved.
+ *
+ * @param args.requestedStart - The raw `?start=` value (or null)
+ * @param args.timeZone - The viewer's IANA timezone (client hints)
+ * @param args.bufferHours - The org's booking start buffer (0 for staff)
+ * @returns Default start/end as DateTimes plus the `startAdjusted` flag
+ */
+function resolveDefaultTimes({
+  requestedStart,
+  timeZone,
+  bufferHours,
+}: {
+  requestedStart: string | null;
+  timeZone: string;
+  bufferHours: number;
+}): { start: DateTime; end: DateTime; startAdjusted: boolean } {
+  const now = DateTime.now().setZone(timeZone);
+  /** The earliest instant a reservation may start (buffer included). */
+  const earliest = now.plus({ hours: bufferHours });
+
+  // The standard default: the next full hour clearing the buffer, 2h long.
+  const fallbackStart = earliest.plus({ hours: 1 }).startOf("hour");
+
+  if (requestedStart && START_PARAM_FORMAT.test(requestedStart)) {
+    const requested = DateTime.fromISO(requestedStart, { zone: timeZone });
+    if (
+      requested.isValid &&
+      requested <= now.plus({ days: START_PARAM_HORIZON_DAYS })
+    ) {
+      if (requested >= earliest) {
+        return {
+          start: requested,
+          end: requested.plus({ hours: 1 }),
+          startAdjusted: false,
+        };
+      }
+      // The tapped slot started moments ago (or sits inside the buffer):
+      // clamp forward to the next quarter-hour that can actually be booked.
+      const clamped = earliest
+        .plus({ minutes: 15 - (earliest.minute % 15) })
+        .startOf("minute");
+      return {
+        start: clamped,
+        end: clamped.plus({ hours: 1 }),
+        startAdjusted: true,
+      };
+    }
+  }
+
+  return {
+    start: fallbackStart,
+    end: fallbackStart.plus({ hours: 2 }),
+    startAdjusted: false,
+  };
+}
+
+/**
  * Loads the room (with anonymized 60-day schedule), its equipment list, the
  * member's own team-member record (the fixed custodian), and hydration-safe
- * default start/end times computed in the viewer's timezone.
+ * default start/end times computed in the viewer's timezone — honoring the
+ * dashboard's `?start=` slot deep link when present (see
+ * {@link resolveDefaultTimes}).
  */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -122,13 +202,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId: selfTeamMember.userId ?? null,
     };
 
-    // Default to the next full hour that clears the org's start-time buffer
-    // (staff bypass the buffer, mirroring upstream booking rules).
+    // Staff bypass the start-time buffer, mirroring upstream booking rules.
     const bufferHours = isStaff ? 0 : bookingSettings.bufferStartTime;
-    const start = DateTime.now()
-      .setZone(getHints(request).timeZone)
-      .plus({ hours: bufferHours + 1 })
-      .startOf("hour");
+    const { start, end, startAdjusted } = resolveDefaultTimes({
+      requestedStart: new URL(request.url).searchParams.get("start"),
+      timeZone: getHints(request).timeZone,
+      bufferHours,
+    });
 
     const header: HeaderData = { title: `Book ${room.name}` };
 
@@ -139,7 +219,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         roomAssets,
         custodian,
         defaultStart: toDateTimeLocalValue(start),
-        defaultEnd: toDateTimeLocalValue(start.plus({ hours: 2 })),
+        defaultEnd: toDateTimeLocalValue(end),
+        startAdjusted,
       })
     );
   } catch (cause) {
@@ -234,8 +315,14 @@ export const handle = {
  * (status, description, included equipment) on the right.
  */
 export default function MemberRoomBookingPage() {
-  const { room, roomAssets, custodian, defaultStart, defaultEnd } =
-    useLoaderData<typeof loader>();
+  const {
+    room,
+    roomAssets,
+    custodian,
+    defaultStart,
+    defaultEnd,
+    startAdjusted,
+  } = useLoaderData<typeof loader>();
 
   return (
     <div>
@@ -244,6 +331,16 @@ export default function MemberRoomBookingPage() {
       <div className="grid grid-cols-1 gap-4 p-4 md:p-6 lg:grid-cols-[1fr,360px]">
         {/* The form */}
         <div className="rounded-lg border border-gray-200 bg-white p-4 md:p-6">
+          {startAdjusted ? (
+            <div
+              role="status"
+              className="mb-4 rounded border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700"
+            >
+              The time you tapped has passed or is too soon to book, so
+              we&apos;ve set the earliest available start — adjust it below if
+              needed.
+            </div>
+          ) : null}
           <RoomBookingForm
             room={room}
             busyWindows={room.busyWindows}

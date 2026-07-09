@@ -91,3 +91,26 @@ export type KioskClosedDays = {
   /** Date-specific closures within the horizon, with the admin's reason. */
   closedOverrides: { date: string; reason: string | null }[];
 };
+
+/**
+ * True when the given calendar day is closed per the org's Working Hours —
+ * either a weekly closed weekday or a date-specific closure override. Used by
+ * the kiosk wallboard and the member dashboard so "is BIG closed that day?"
+ * is answered the same way everywhere.
+ *
+ * @param closedDays - The feed from `getKioskClosedDays`
+ * @param dateKey - The day as a "YYYY-MM-DD" key
+ * @param jsWeekday - The day's JS weekday number (0=Sun…6=Sat; Luxon callers
+ *   pass `day.weekday % 7`)
+ */
+export function isDateClosed(
+  closedDays: KioskClosedDays,
+  dateKey: string,
+  jsWeekday: number
+): boolean {
+  if (!closedDays.enabled) return false;
+  return (
+    closedDays.weeklyClosedWeekdays.includes(jsWeekday) ||
+    closedDays.closedOverrides.some((override) => override.date === dateKey)
+  );
+}
