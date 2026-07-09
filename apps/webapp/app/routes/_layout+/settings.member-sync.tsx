@@ -258,6 +258,11 @@ export default function MemberSyncSettings() {
             </p>
           ) : null}
 
+          <p className="text-xs text-gray-500">
+            This runs automatically every night — use the button only when you
+            want to refresh the allowlist right away.
+          </p>
+
           {/* Diagnostic */}
           <div className="flex flex-col gap-1 border-t border-gray-100 pt-4">
             <span className="text-xs font-medium text-gray-700">
