@@ -273,17 +273,87 @@ export async function linkNeonAccountByEmail(email: string): Promise<void> {
 }
 
 /**
- * Reservation gate. A MEMBER may reserve only when they are either
- * (a) exempt from the membership check — an admin-invited non-Neon user
- * (volunteer, partner) whose `UserOrganization.membershipCheckExempt` is set —
- * or (b) on the synced active-member allowlist (`NeonAllowlistMember`, refreshed
- * by the admin sync). Non-MEMBER roles (staff) are never gated here.
+ * Core reservation-eligibility rule, returned as a boolean so callers that need
+ * to BRANCH rather than throw can reuse the exact same logic — notably the
+ * kiosk walk-up flow, which shows a "become a member" sign-up screen for an
+ * ineligible email instead of erroring out. {@link assertMemberCanReserve}
+ * wraps this and throws.
+ *
+ * A user is eligible to reserve when ANY of these hold:
+ * - they are not a MEMBER of the workspace (staff/admin are never gated here);
+ * - their MEMBER row is `membershipCheckExempt` (an admin-invited non-Neon user
+ *   — volunteer, partner);
+ * - Neon isn't configured (fail-open so an install works before creds are wired);
+ * - their email is on the synced active-member allowlist (`NeonAllowlistMember`).
+ *
+ * The check is a local table lookup — no live Neon call — so it's fast and
+ * offline-safe; the admin re-syncs to refresh membership. Fails OPEN (returns
+ * true) if the local lookup itself errors, so a DB blip never blocks
+ * reservations. Returns false ONLY on a definitive "is a non-exempt MEMBER,
+ * Neon is configured, and the email is not on the allowlist".
+ *
+ * @param args.userId - The user whose membership is in question
+ * @param args.organizationId - The workspace the reservation is in
+ * @returns Whether the user may currently reserve
+ */
+export async function isMemberReservationEligible({
+  userId,
+  organizationId,
+}: {
+  userId: string;
+  organizationId: string;
+}): Promise<boolean> {
+  const membership = await db.userOrganization.findFirst({
+    where: { userId, organizationId },
+    select: {
+      roles: true,
+      membershipCheckExempt: true,
+      user: { select: { email: true } },
+    },
+  });
+
+  // Not a member of this workspace, or not a MEMBER (staff/admin) → not our gate.
+  if (!membership || !membership.roles.includes(OrganizationRoles.MEMBER)) {
+    return true;
+  }
+  // Admin-exempted non-Neon member (volunteer/partner) → always allowed.
+  if (membership.membershipCheckExempt) {
+    return true;
+  }
+  // Neon not configured (e.g. local dev before creds are wired) → don't block.
+  if (!isNeonApiConfigured()) {
+    return true;
+  }
+
+  try {
+    // On the synced active-member allowlist → allowed; otherwise definitively not.
+    return await isEmailOnNeonAllowlist(membership.user.email);
+  } catch (cause) {
+    // Local lookup errored → fail OPEN so a DB blip doesn't block reservations.
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Neon allowlist check failed at reservation time; allowing the reservation (fail-open).",
+        additionalData: { userId, organizationId },
+        label,
+      })
+    );
+    return true;
+  }
+}
+
+/**
+ * Reservation gate. A MEMBER may reserve only when
+ * {@link isMemberReservationEligible} is true; non-MEMBER roles (staff) are
+ * never gated here.
  *
  * Enforced independently of how they logged in (Google, email, Neon, SSO), so a
- * lapsed member can't keep reserving. The check is a local table lookup — no
- * live Neon call — so it's fast and offline-safe; the admin re-syncs to refresh
- * membership. Fails OPEN only if the local lookup itself errors (a DB blip must
- * not block reservations) but fails CLOSED on a definitive "not on the list".
+ * lapsed member can't keep reserving. Placed in `createBooking` so it covers
+ * every reservation entry point where the reserving MEMBER is the booking's
+ * creator. (Staff-mediated flows — e.g. the kiosk booking someone in as
+ * custodian — must check the CUSTODIAN's membership at the call site instead,
+ * since the creator there is a staff account this gate intentionally skips.)
  *
  * @param args.userId - The reserving user (the booking's creator)
  * @param args.organizationId - The workspace the reservation is in
@@ -296,43 +366,7 @@ export async function assertMemberCanReserve({
   userId: string;
   organizationId: string;
 }): Promise<void> {
-  const membership = await db.userOrganization.findFirst({
-    where: { userId, organizationId },
-    select: {
-      roles: true,
-      membershipCheckExempt: true,
-      user: { select: { email: true } },
-    },
-  });
-
-  // Not a member of this workspace, or not a MEMBER (staff/admin) → not our gate.
-  if (!membership || !membership.roles.includes(OrganizationRoles.MEMBER)) {
-    return;
-  }
-  // Admin-exempted non-Neon member (volunteer/partner) → always allowed.
-  if (membership.membershipCheckExempt) {
-    return;
-  }
-  // Neon not configured (e.g. local dev before creds are wired) → don't block.
-  if (!isNeonApiConfigured()) {
-    return;
-  }
-
-  try {
-    if (await isEmailOnNeonAllowlist(membership.user.email)) {
-      return; // on the synced active-member allowlist → allowed
-    }
-  } catch (cause) {
-    // Local lookup errored → fail OPEN so a DB blip doesn't block reservations.
-    Logger.error(
-      new ShelfError({
-        cause,
-        message:
-          "Neon allowlist check failed at reservation time; allowing the reservation (fail-open).",
-        additionalData: { userId, organizationId },
-        label,
-      })
-    );
+  if (await isMemberReservationEligible({ userId, organizationId })) {
     return;
   }
 

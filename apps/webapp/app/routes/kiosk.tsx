@@ -31,7 +31,7 @@
  * @see {@link file://./../modules/big-kiosk-content/service.server.ts}
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MegaphoneIcon } from "lucide-react";
+import { MegaphoneIcon, UserPlusIcon } from "lucide-react";
 import { DateTime } from "luxon";
 import QRCode from "qrcode-generator";
 import type {
@@ -58,7 +58,9 @@ import {
   getKioskPromos,
   splitKioskNews,
 } from "~/modules/big-kiosk-content/service.server";
+import { DEFAULT_MEMBERSHIP_SIGNUP_URL } from "~/modules/big-kiosk-content/shared";
 import type { KioskClosedDays } from "~/modules/big-kiosk-content/shared";
+import { isMemberReservationEligible } from "~/modules/big-neon-auth/service.server";
 import {
   createRoomReservation,
   findOrgMemberByEmail,
@@ -154,6 +156,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // Admin-authored news lines for the top banner (empty = hidden).
         newsMessages: splitKioskNews(config?.newsMessages),
         closedDays,
+        // Where the walk-up "must be a member to book" QR points — the BIG
+        // membership FORM, matching the same link in MEMBERSHIP_REQUIRED_MESSAGE
+        // (the /reserve portal gate). Kept distinct from the wall's admin-editable
+        // "become a member" marketing card (`membership` above) so this
+        // conversion funnel always lands on the real sign-up form.
+        membershipSignupUrl: DEFAULT_MEMBERSHIP_SIGNUP_URL,
       })
     );
   } catch (cause) {
@@ -245,17 +253,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     const member = await findOrgMemberByEmail({ organizationId, email });
-    if (!member) {
-      throw new ShelfError({
-        cause: null,
-        title: "Email not recognized",
-        message:
-          "We couldn't find an active membership for that email. Use the email on your BIG account, or ask staff for help.",
-        additionalData: { organizationId },
-        label: "Booking",
-        status: 400,
-        shouldBeCaptured: false,
-      });
+
+    // ACTIVE-MEMBERSHIP GATE. `createRoomReservation` runs the Neon gate against
+    // the booking's creator — here the STAFF kiosk account — so it never checks
+    // the walk-up person. Enforce it explicitly on the CUSTODIAN's email: they
+    // must be a current member (on the synced Neon allowlist, or exempt) to
+    // book. A non-member (no account, OR a lapsed membership) gets the same
+    // "become a member" response — never revealing whether an email has an
+    // account — and the wall shows a sign-up QR instead of a booking.
+    const isEligible = member
+      ? await isMemberReservationEligible({
+          userId: member.user.id,
+          organizationId,
+        })
+      : false;
+    if (!member || !isEligible) {
+      return data(
+        payload({ ok: false as const, needsMembership: true as const })
+      );
     }
 
     const hints = getClientHint(request);
@@ -352,6 +367,7 @@ function KioskBoard() {
     membership,
     newsMessages,
     closedDays,
+    membershipSignupUrl,
   } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const [now, setNow] = useState(() => DateTime.now());
@@ -545,6 +561,7 @@ function KioskBoard() {
         <WalkUpBookingSheet
           room={sheet.room}
           slotStart={sheet.slotStart}
+          membershipSignupUrl={membershipSignupUrl}
           onClose={closeSheet}
         />
       ) : null}
@@ -1246,14 +1263,18 @@ function ClosedDatesCalendar({
 function WalkUpBookingSheet({
   room,
   slotStart,
+  membershipSignupUrl,
   onClose,
 }: {
   room: ClientRoomSchedule;
   slotStart: DateTime;
+  membershipSignupUrl: string;
   onClose: () => void;
 }) {
   const fetcher = useFetcher<typeof action>();
   const [durationMinutes, setDurationMinutes] = useState<number>(60);
+  // Lets the "become a member" screen fall back to the form for a retry.
+  const [retryEmail, setRetryEmail] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
   const isSubmitting = useDisabled(fetcher);
   const result = fetcher.data;
@@ -1262,6 +1283,17 @@ function WalkUpBookingSheet({
       ? result.confirmation ?? null
       : null;
   const succeeded = confirmation !== null;
+  // The email isn't a current member → show the sign-up QR instead of booking.
+  // Gated on `!isSubmitting` so a RETRY submission (where fetcher.data still
+  // holds the previous "needsMembership" payload until the new response lands)
+  // shows the form's "Reserving…" state, not a stale QR flashing over an
+  // in-flight — possibly successful — booking.
+  const needsMembership =
+    !isSubmitting &&
+    !retryEmail &&
+    result != null &&
+    "needsMembership" in result &&
+    result.needsMembership === true;
   const errorMessage =
     result && "error" in result && result.error ? result.error.message : null;
 
@@ -1275,6 +1307,15 @@ function WalkUpBookingSheet({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  // A fresh submission clears a prior retry so a new non-member email re-shows
+  // the sign-up screen; refocus the email field when returning to the form.
+  useEffect(() => {
+    if (fetcher.state === "submitting") setRetryEmail(false);
+  }, [fetcher.state]);
+  useEffect(() => {
+    if (retryEmail) emailRef.current?.focus();
+  }, [retryEmail]);
 
   // Auto-dismiss the success panel so the wallboard returns to the schedule.
   useEffect(() => {
@@ -1332,6 +1373,46 @@ function WalkUpBookingSheet({
             >
               Done
             </button>
+          </div>
+        ) : needsMembership ? (
+          <div className="py-2 text-center">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-primary-500/20 text-primary-200">
+              <UserPlusIcon className="size-7" aria-hidden />
+            </div>
+            <h2 className="mt-4 text-2xl font-semibold">
+              Become a BIG member to book
+            </h2>
+            <p className="mx-auto mt-2 max-w-md text-gray-300">
+              We couldn&apos;t find an active BIG membership for that email.
+              Membership takes a minute — scan to sign up, then come back and
+              reserve.
+            </p>
+            <div className="mt-5 flex justify-center">
+              <QRImage
+                value={membershipSignupUrl}
+                alt="QR code to sign up for a BIG membership"
+                className="size-52 rounded-xl bg-white p-3"
+              />
+            </div>
+            <p className="mt-3 break-all text-sm text-gray-400">
+              {membershipSignupUrl}
+            </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setRetryEmail(true)}
+                className="h-12 rounded-lg bg-white/10 px-6 text-base font-medium hover:bg-white/20"
+              >
+                Try a different email
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-12 rounded-lg bg-white/10 px-6 text-base font-medium hover:bg-white/20"
+              >
+                Done
+              </button>
+            </div>
           </div>
         ) : (
           <fetcher.Form method="post">

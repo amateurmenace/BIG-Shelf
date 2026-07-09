@@ -13,6 +13,15 @@ import { z } from "zod";
 /** The wallboard shows at most this many promo cards. */
 export const MAX_KIOSK_PROMOS = 3;
 
+/**
+ * Default target for the kiosk's "become a member" sign-up QR — the BIG
+ * membership form. Used when a walk-up booker isn't an active member and the
+ * admin hasn't set a custom sign-up URL in the Kiosk CMS. Kept in sync with the
+ * URL in the reservation-gate message so both funnels point to one place.
+ */
+export const DEFAULT_MEMBERSHIP_SIGNUP_URL =
+  "https://brooklineinteractive.app.neoncrm.com/forms/membership";
+
 /** The kiosk rotates through at most this many news lines. */
 export const MAX_KIOSK_NEWS = 5;
 

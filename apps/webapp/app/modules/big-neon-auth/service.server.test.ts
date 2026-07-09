@@ -28,7 +28,10 @@ import { db } from "~/database/db.server";
 import { isNeonApiConfigured } from "~/integrations/neon-crm/client.server";
 import { isEmailOnNeonAllowlist } from "~/modules/big-neon-sync/service.server";
 
-import { assertMemberCanReserve } from "./service.server";
+import {
+  assertMemberCanReserve,
+  isMemberReservationEligible,
+} from "./service.server";
 
 const ARGS = { userId: "u1", organizationId: "org1" };
 const mf = (f: unknown) => f as ReturnType<typeof vi.fn>;
@@ -86,6 +89,55 @@ describe("assertMemberCanReserve", () => {
     withMembership(membership(["MEMBER"]));
     mf(isNeonApiConfigured).mockReturnValue(false);
     await expect(assertMemberCanReserve(ARGS)).resolves.toBeUndefined();
+    expect(isEmailOnNeonAllowlist).not.toHaveBeenCalled();
+  });
+});
+
+describe("isMemberReservationEligible", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mf(isNeonApiConfigured).mockReturnValue(true);
+  });
+
+  it("is eligible for staff (non-MEMBER role) without checking the allowlist", async () => {
+    withMembership(membership(["ADMIN"]));
+    await expect(isMemberReservationEligible(ARGS)).resolves.toBe(true);
+    expect(isEmailOnNeonAllowlist).not.toHaveBeenCalled();
+  });
+
+  it("is eligible for a user who isn't a member of the workspace", async () => {
+    withMembership(null);
+    await expect(isMemberReservationEligible(ARGS)).resolves.toBe(true);
+  });
+
+  it("is eligible for an exempt member without checking the allowlist", async () => {
+    withMembership(membership(["MEMBER"], true));
+    await expect(isMemberReservationEligible(ARGS)).resolves.toBe(true);
+    expect(isEmailOnNeonAllowlist).not.toHaveBeenCalled();
+  });
+
+  it("is eligible for a member on the synced allowlist", async () => {
+    withMembership(membership(["MEMBER"]));
+    mf(isEmailOnNeonAllowlist).mockResolvedValue(true);
+    await expect(isMemberReservationEligible(ARGS)).resolves.toBe(true);
+  });
+
+  it("is INELIGIBLE for a member not on the synced allowlist", async () => {
+    withMembership(membership(["MEMBER"]));
+    mf(isEmailOnNeonAllowlist).mockResolvedValue(false);
+    await expect(isMemberReservationEligible(ARGS)).resolves.toBe(false);
+  });
+
+  it("fails OPEN (eligible) when the allowlist lookup errors", async () => {
+    withMembership(membership(["MEMBER"]));
+    mf(isEmailOnNeonAllowlist).mockRejectedValue(new Error("db down"));
+    await expect(isMemberReservationEligible(ARGS)).resolves.toBe(true);
+  });
+
+  it("is eligible when Neon is unconfigured", async () => {
+    withMembership(membership(["MEMBER"]));
+    mf(isNeonApiConfigured).mockReturnValue(false);
+    await expect(isMemberReservationEligible(ARGS)).resolves.toBe(true);
     expect(isEmailOnNeonAllowlist).not.toHaveBeenCalled();
   });
 });
