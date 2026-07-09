@@ -192,6 +192,25 @@ vitest.mock("~/modules/activity-event/service.server", () => ({
   recordEvents: vitest.fn().mockResolvedValue(undefined),
 }));
 
+// why: the BIG membership reserve-gate is unit-tested in big-neon-auth; running
+// it here would need unrelated userOrganization/allowlist fixtures. Allow all.
+vitest.mock("~/modules/big-neon-auth/service.server", () => ({
+  assertMemberCanReserve: vitest.fn().mockResolvedValue(undefined),
+}));
+
+// why: the BIG loan-agreement checkout gate is unit-tested in its own module;
+// these tests exercise checkout mechanics, not the e-sign gate. "No template".
+vitest.mock("~/modules/big-loan-agreement/service.server", () => ({
+  bookingNeedsAgreementSignature: vitest.fn().mockResolvedValue(false),
+}));
+
+// why: the BIG Google Calendar push is best-effort and unit-tested in
+// big-room-calendar; mocking keeps booking tests free of calendar fixtures.
+vitest.mock("~/modules/big-room-calendar/service.server", () => ({
+  upsertBookingRoomEvents: vitest.fn().mockResolvedValue(undefined),
+  deleteBookingRoomEvents: vitest.fn().mockResolvedValue(undefined),
+}));
+
 // why: preventing actual email sending during tests
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),

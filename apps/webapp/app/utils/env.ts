@@ -83,6 +83,9 @@ declare global {
       NEON_OAUTH_CLIENT_ID: string;
       NEON_OAUTH_CLIENT_SECRET: string;
       NEON_MEMBER_ORG_ID: string;
+      GOOGLE_CALENDAR_SA_EMAIL: string;
+      GOOGLE_CALENDAR_SA_PRIVATE_KEY: string;
+      GOOGLE_ROOM_CALENDAR_ID: string;
     }
   }
 }
@@ -264,6 +267,28 @@ export const NEON_OAUTH_CLIENT_SECRET = getEnv("NEON_OAUTH_CLIENT_SECRET", {
   isRequired: false,
 });
 export const NEON_MEMBER_ORG_ID = getEnv("NEON_MEMBER_ORG_ID", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Google Calendar room-bookings push (BIG). All optional — when any is unset
+ * the integration reports "not configured" and every push/no-ops gracefully
+ * (see ~/integrations/google-calendar/client.server). The service-account
+ * email is intentionally non-secret: the admin setup page displays it so staff
+ * know which address to share the calendar with. The private key is the PEM
+ * from the service-account JSON key (Fly secrets keep literal "\n"s — the
+ * client restores real newlines).
+ */
+export const GOOGLE_CALENDAR_SA_EMAIL = getEnv("GOOGLE_CALENDAR_SA_EMAIL", {
+  isSecret: false,
+  isRequired: false,
+});
+export const GOOGLE_CALENDAR_SA_PRIVATE_KEY = getEnv(
+  "GOOGLE_CALENDAR_SA_PRIVATE_KEY",
+  { isSecret: true, isRequired: false }
+);
+export const GOOGLE_ROOM_CALENDAR_ID = getEnv("GOOGLE_ROOM_CALENDAR_ID", {
   isSecret: false,
   isRequired: false,
 });

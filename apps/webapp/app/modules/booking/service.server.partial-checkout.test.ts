@@ -109,6 +109,12 @@ vitest.mock("~/utils/org-validation.server", () => ({
   assertAssetsBelongToOrg: vitest.fn().mockResolvedValue(undefined),
 }));
 
+// why: the BIG loan-agreement gate runs inside the full-checkout delegate; it
+// is unit-tested in its own module — report "no template" so checkout proceeds.
+vitest.mock("~/modules/big-loan-agreement/service.server", () => ({
+  bookingNeedsAgreementSignature: vitest.fn().mockResolvedValue(false),
+}));
+
 // why: prevent real email sends from the full-checkout delegate path.
 vitest.mock("~/emails/mail.server", () => ({
   sendEmail: vitest.fn(),

@@ -28,6 +28,10 @@ import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
 import { bookingNeedsAgreementSignature } from "~/modules/big-loan-agreement/service.server";
 import { assertMemberCanReserve } from "~/modules/big-neon-auth/service.server";
+import {
+  deleteBookingRoomEvents,
+  upsertBookingRoomEvents,
+} from "~/modules/big-room-calendar/service.server";
 import { notifyWaitlistForFreedAssets } from "~/modules/big-waitlist/service.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -1009,6 +1013,10 @@ export async function updateBasicBooking({
       });
     }
 
+    // BIG: keep the shared Google Calendar in step with name/date changes.
+    // No-ops for drafts (no events exist yet); best-effort, never throws.
+    void upsertBookingRoomEvents({ bookingId: updatedBooking.id });
+
     return updatedBooking;
   } catch (cause) {
     throw new ShelfError({
@@ -1296,6 +1304,10 @@ export async function reserveBooking({
       userId,
       custodianUserId: updatedBooking.custodianUserId || undefined,
     });
+
+    // BIG: mirror the reserved rooms onto the shared Google Calendar.
+    // Best-effort (never throws) — a calendar hiccup must not break reserving.
+    void upsertBookingRoomEvents({ bookingId: updatedBooking.id });
 
     return updatedBooking;
   } catch (cause) {
@@ -3503,6 +3515,10 @@ export async function updateBookingRooms({
       }
     }
 
+    // BIG: push the newly-added rooms onto the shared Google Calendar (no-op
+    // for drafts — their events are created at reserve time). Best-effort.
+    void upsertBookingRoomEvents({ bookingId: booking.id });
+
     return booking;
   } catch (cause) {
     throw new ShelfError({
@@ -3662,6 +3678,14 @@ export async function removeBookingRooms({
         })
       );
     }
+
+    // BIG: the rooms are no longer part of this booking — take their events
+    // off the shared Google Calendar. Explicit ids (the links are gone).
+    // Best-effort, never throws.
+    void deleteBookingRoomEvents({
+      bookingId: booking.id,
+      roomIds: uniqueRoomIds,
+    });
 
     return booking;
   } catch (cause) {
@@ -3909,6 +3933,11 @@ export async function cancelBooking({
       );
     }
 
+    // BIG: a cancelled booking frees its rooms — remove their events from the
+    // shared Google Calendar (rooms are still linked, so the module can look
+    // them up). Best-effort, never throws.
+    void deleteBookingRoomEvents({ bookingId: bookingFound.id });
+
     return booking;
   } catch (cause) {
     throw new ShelfError({
@@ -3982,6 +4011,11 @@ export async function revertBookingToDraft({
 
     /** Cancels all scheduled events */
     await cancelScheduler(cancelledBooking);
+
+    // BIG: back to draft = no longer on the shared Google Calendar (the events
+    // return at re-reserve). Rooms stay linked, so the module looks them up.
+    // Best-effort, never throws.
+    void deleteBookingRoomEvents({ bookingId: cancelledBooking.id });
 
     return cancelledBooking;
   } catch (cause) {
@@ -4232,6 +4266,10 @@ export async function extendBooking({
         when,
       });
     }
+
+    // BIG: reflect the extended end time on the shared Google Calendar.
+    // Best-effort, never throws.
+    void upsertBookingRoomEvents({ bookingId: updatedBooking.id });
 
     return updatedBooking;
   } catch (cause) {
@@ -4857,7 +4895,18 @@ export async function deleteBooking(
             id: true,
           },
         },
+        // BIG: the delete's return value is the last chance to know which
+        // rooms were linked — needed to remove their Google Calendar events.
+        rooms: { select: { id: true } },
       },
+    });
+
+    // BIG: take the deleted booking's room events off the shared Google
+    // Calendar. Explicit ids — the booking row (and its room links) are gone.
+    // Best-effort, never throws (`?? []` keeps even a malformed return safe).
+    void deleteBookingRoomEvents({
+      bookingId: b.id,
+      roomIds: (b.rooms ?? []).map((room) => room.id),
     });
 
     // Resolve notification recipients and send personalized emails
@@ -5455,6 +5504,9 @@ export async function bulkDeleteBookings({
         include: {
           ...BOOKING_INCLUDE_FOR_EMAIL,
           assets: { select: { id: true, kitId: true } },
+          // BIG: captured pre-delete so the Google Calendar room events can be
+          // removed after the rows (and their room links) are gone.
+          rooms: { select: { id: true } },
         },
       }),
       getUserByID(userId, {
@@ -5533,6 +5585,16 @@ export async function bulkDeleteBookings({
     await Promise.all(
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
+
+    // BIG: remove the deleted bookings' room events from the shared Google
+    // Calendar (explicit ids — the rows are gone). Best-effort, never throws
+    // (`?? []` keeps even a malformed return safe).
+    for (const b of bookings) {
+      const roomIds = (b.rooms ?? []).map((room) => room.id);
+      if (roomIds.length > 0) {
+        void deleteBookingRoomEvents({ bookingId: b.id, roomIds });
+      }
+    }
 
     // Resolve notification recipients and send personalized emails for each deleted booking
     for (const b of bookings) {
@@ -5819,6 +5881,13 @@ export async function bulkCancelBookings({
     await Promise.all(
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
+
+    // BIG: cancelled bookings free their rooms — remove their events from the
+    // shared Google Calendar (rooms are still linked; the module looks them
+    // up). Best-effort, never throws.
+    for (const b of bookings) {
+      void deleteBookingRoomEvents({ bookingId: b.id });
+    }
 
     // Resolve notification recipients and send personalized cancellation emails
     for (const b of bookings) {

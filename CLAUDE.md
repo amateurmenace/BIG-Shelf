@@ -28,11 +28,17 @@ additions on top of upstream's changes.
   is booked). Additive: `app/modules/big-member/`,
   `app/routes/_layout+/reserve.tsx`. Core edits: the `home.tsx` MEMBER→`/reserve`
   redirect and the sidebar nav hook.
-- **Neon CRM integration + multi-path auth** — members are provisioned from Neon
-  CRM (the source of truth) via Neon OAuth, Neon-gated email/password, or
-  SSO→Member. Additive: `app/integrations/neon-crm/`, `app/modules/big-neon-auth/`,
-  `app/routes/_auth+/neon-*`. Core edits: `login.tsx`, `join.tsx`, `send-otp.tsx`,
-  `otp.tsx`, `server/index.ts` (public-route allowlist), the user service,
+- **Neon CRM integration + multi-path auth** — Neon CRM is the source of truth
+  for WHO is an active member, mirrored into a local allowlist table
+  (`NeonAllowlistMember`) by the admin "Sync members from Neon" action. The sync
+  creates NO login accounts/passwords; people sign in by their own method
+  (Google / Microsoft / email OTP / Neon OAuth) and are cross-referenced against
+  the allowlist at signup and at reserve time (plus the per-member
+  `membershipCheckExempt` bypass). Additive: `app/integrations/neon-crm/`,
+  `app/modules/big-neon-auth/`, `app/modules/big-neon-sync/`,
+  `app/routes/_auth+/neon-*`, `app/routes/_layout+/settings.member-sync.tsx`.
+  Core edits: `login.tsx`, `join.tsx`, `send-otp.tsx`, `otp.tsx`,
+  `server/index.ts` (public-route allowlist), the user service,
   `utils/env.ts` (the `NEON_*` vars).
 - **Digital loan agreements** — a per-checkout e-signed agreement putting
   liability on the borrower. Additive: `app/modules/big-loan-agreement/`,
@@ -56,6 +62,18 @@ additions on top of upstream's changes.
   `server/index.ts` (allowlist), `utils/env.ts`. Gated by
   `ENABLE_GOOGLE_LOGIN` / `ENABLE_MICROSOFT_LOGIN` (off until set) AND the provider
   must be enabled in the Supabase dashboard.
+- **Room calendar → Google Workspace** — room bookings are mirrored in real time
+  onto a shared Google Calendar (service-account push; one event per
+  booking+room with a deterministic id, so pushes are idempotent). Booking
+  lifecycle hooks (reserve / date change / rooms added-removed / extend /
+  cancel / revert / delete / bulk cancel-delete) fire best-effort pushes that
+  never break the mutation; an admin "Sync calendar now" reconciles (push all
+  active + prune stale upcoming). Additive: `app/integrations/google-calendar/`,
+  `app/modules/big-room-calendar/`,
+  `app/routes/_layout+/settings.room-calendar.tsx`. Core edits: the lifecycle
+  hooks in `app/modules/booking/service.server.ts`, the settings tab, and
+  `utils/env.ts` (`GOOGLE_CALENDAR_SA_EMAIL`, `GOOGLE_CALENDAR_SA_PRIVATE_KEY`,
+  `GOOGLE_ROOM_CALENDAR_ID` — feature is off until all three are set).
 
 When adding new BIG features, prefer **additive** files (new modules / routes /
 components) over editing upstream files, to keep upstream merges clean.

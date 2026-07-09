@@ -65,6 +65,10 @@ export default function SettingsPage() {
     { to: "team", content: "Team" },
     // BIG: bulk member sync from Neon CRM (admin-only, org-scoped).
     ...(!_isPersonalOrg ? [{ to: "member-sync", content: "Member sync" }] : []),
+    // BIG: room bookings → shared Google Calendar (admin-only, team orgs).
+    ...(!_isPersonalOrg
+      ? [{ to: "room-calendar", content: "Room calendar" }]
+      : []),
   ];
 
   const { isBaseOrSelfService } = useUserRoleHelper();
@@ -79,6 +83,7 @@ export default function SettingsPage() {
           "bookings",
           "emails",
           "member-sync",
+          "room-calendar",
         ].includes(item.to)
     );
   }

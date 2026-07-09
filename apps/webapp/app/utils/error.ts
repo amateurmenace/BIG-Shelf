@@ -113,7 +113,8 @@ export type FailureReason = {
     | "Asset Condition" // BIG condition/maintenance log
     | "Waitlist" // BIG equipment waitlists
     | "Reminder" // BIG automated booking reminders
-    | "Social Auth"; // BIG Google/Microsoft social login
+    | "Social Auth" // BIG Google/Microsoft social login
+    | "Room Calendar"; // BIG room bookings → Google Calendar push
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html
