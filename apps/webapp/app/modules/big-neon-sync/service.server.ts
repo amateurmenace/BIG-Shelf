@@ -1,83 +1,52 @@
 /**
- * BIG Neon member sync — server service
+ * BIG Neon member allowlist — server service
  *
- * The admin "Sync now" bulk pull: fetches every ACTIVE member from Neon CRM and
- * provisions/refreshes their Shelf login (the MEMBER role in BIG's member
- * workspace), so members exist in Shelf without each having to self-sign-up.
- * Neon is the source of truth.
+ * Neon CRM is BIG's source of truth for WHO is an active member. This module
+ * owns the local mirror of that fact: the `NeonAllowlistMember` table. The admin
+ * "Sync members from Neon" action pulls the current active-member list from the
+ * Neon API and REPLACES the table (upsert the current set, delete anyone who has
+ * dropped off). Nothing here creates a login: no Supabase users, no passwords,
+ * no Shelf `User` rows. People still sign in by their own method (Google /
+ * Microsoft / email OTP); the app only cross-references their email against this
+ * table.
  *
- * `previewNeonMemberSync` is READ-ONLY — it reports what a sync WOULD do so an
- * admin can see the impact first. `syncNeonMembers` performs the provisioning.
- * Both share one classification pass. `syncNeonMembers` is idempotent (safe to
- * re-run) and is structured so a future scheduled job can call it directly.
+ * Enforcement (the reserve gate and the signup cross-reference in
+ * `~/modules/big-neon-auth`) reads THIS table via {@link isEmailOnNeonAllowlist}
+ * / {@link findNeonAllowlistMemberByEmail} — a fast, offline-safe lookup — rather
+ * than making a live Neon API call. The admin re-syncs to refresh membership.
  *
- * @see {@link file://./../../integrations/neon-crm/client.server.ts}
- * @see {@link file://./../big-neon-auth/service.server.ts} — the per-login equivalent
- * @see {@link file://./../../routes/_layout+/settings.member-sync.tsx}
+ * @see {@link file://./../../integrations/neon-crm/client.server.ts} — the Neon API client
+ * @see {@link file://./../big-neon-auth/service.server.ts} — the enforcement that reads this table
+ * @see {@link file://./../../routes/_layout+/settings.member-sync.tsx} — the admin UI
  */
-import { randomUUID } from "node:crypto";
-import { OrganizationRoles } from "@prisma/client";
+import type { NeonAllowlistMember } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   isNeonApiConfigured,
   listActiveNeonMembers,
 } from "~/integrations/neon-crm/client.server";
-import { createUserOrAttachOrg } from "~/modules/user/service.server";
-import { NEON_MEMBER_ORG_ID } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
 const label = "Neon Sync" as const;
 
-/** Cap on how many per-member errors we surface back to the admin. */
-const MAX_REPORTED_ERRORS = 25;
-
-/**
- * Aggregate outcome of a sync (or a preview, where the same fields describe what
- * WOULD happen).
- */
-export type NeonSyncResult = {
-  /** Active members Neon returned. */
-  totalActive: number;
-  /** New Shelf users provisioned. */
-  created: number;
-  /** Existing users given the MEMBER role in the workspace. */
-  attached: number;
-  /** Already members — nothing to do (Neon id re-stamped if missing). */
-  skipped: number;
-  /** Members that could not be provisioned. */
-  failed: number;
-  /**
-   * Members whose Neon membership has lapsed — they were provisioned from Neon
-   * but are no longer in the active set — and had their MEMBER role removed
-   * (reconcile). Exempt (admin-invited non-Neon) members are never counted here.
-   */
-  deactivated: number;
-  /** Whether these numbers are a dry-run projection (preview) or actual. */
-  previewOnly: boolean;
-  /** Up to {@link MAX_REPORTED_ERRORS} per-member failures. */
-  errors: { email: string; message: string }[];
+/** Outcome of a sync run — deliberately minimal. */
+export type NeonAllowlistSyncResult = {
+  /** How many active members are on the allowlist after this run. */
+  activeCount: number;
 };
 
-/** Prior state of a Shelf user relative to the member workspace. */
-type PriorState = { alreadyMember: boolean; hasNeonId: boolean };
+/** Status of the allowlist, for the admin status line. */
+export type NeonAllowlistStatus = {
+  /** Rows currently on the allowlist. */
+  activeCount: number;
+  /** The most recent sync time (null when the allowlist has never been synced). */
+  lastSyncedAt: Date | null;
+};
 
-/**
- * Resolves the member workspace id (the org members are synced into) or throws
- * a clear 503 when it isn't configured.
- */
-function requireMemberOrgId(): string {
-  if (!NEON_MEMBER_ORG_ID) {
-    throw new ShelfError({
-      cause: null,
-      title: "Member workspace not configured",
-      message:
-        "NEON_MEMBER_ORG_ID is not set, so there is no workspace to sync members into.",
-      label,
-      status: 503,
-      shouldBeCaptured: false,
-    });
-  }
-  return NEON_MEMBER_ORG_ID;
+/** Normalizes an email for storage/lookup: trimmed + lowercased, or null. */
+function normalizeEmail(email: string | null | undefined): string | null {
+  const normalized = email?.trim().toLowerCase();
+  return normalized ? normalized : null;
 }
 
 /** Throws a 503 when the Neon REST API credentials are not configured. */
@@ -96,263 +65,121 @@ function assertNeonConfigured(): void {
 }
 
 /**
- * Batch-loads the prior state of many emails in ONE query: whether each already
- * holds the MEMBER role in the workspace and whether their Neon id is stamped.
+ * Refreshes the local active-member allowlist from Neon CRM.
  *
- * @param emails - Lowercased emails to look up
- * @param organizationId - The member workspace
- * @returns Map keyed by lowercased email → {@link PriorState} (absent = no user)
- */
-async function loadPriorStateByEmail(
-  emails: string[],
-  organizationId: string
-): Promise<Map<string, PriorState>> {
-  const users = await db.user.findMany({
-    where: { email: { in: emails } },
-    select: {
-      email: true,
-      neonAccountId: true,
-      userOrganizations: {
-        where: { organizationId },
-        select: { roles: true },
-      },
-    },
-  });
-
-  return new Map(
-    users.map((user) => [
-      user.email.toLowerCase(),
-      {
-        alreadyMember: (user.userOrganizations[0]?.roles ?? []).includes(
-          OrganizationRoles.MEMBER
-        ),
-        hasNeonId: Boolean(user.neonAccountId),
-      },
-    ])
-  );
-}
-
-/** Best-effort: stamp a user's Neon account id if it isn't already set. */
-async function stampNeonId(
-  email: string,
-  neonAccountId: string,
-  alreadyStamped: boolean
-): Promise<void> {
-  if (alreadyStamped) {
-    return;
-  }
-  // Swallow — a unique-collision or race must not fail the whole member; the
-  // next sync/login reconciles it (mirrors linkNeonAccountByEmail).
-  await db.user
-    .update({ where: { email }, data: { neonAccountId } })
-    .catch(() => undefined);
-}
-
-/**
- * Fetches active Neon members and classifies each against Shelf's current state.
- * Shared by preview + sync so both agree on the numbers.
+ * Pulls every ACTIVE member from Neon, then REPLACES the `NeonAllowlistMember`
+ * table to match: each current member is upserted (by lowercased email) and any
+ * row whose email is no longer active is removed. Runs in one transaction so the
+ * table is never left half-updated. Creates NO login accounts of any kind.
  *
- * @returns The member list, the normalized emails, and the prior-state map
+ * @returns The number of active members on the allowlist after the run
+ * @throws {ShelfError} If the Neon API is not configured or a request fails
  */
-async function loadMembersAndPriorState() {
+export async function syncNeonAllowlist(): Promise<NeonAllowlistSyncResult> {
   assertNeonConfigured();
-  const organizationId = requireMemberOrgId();
 
   const members = await listActiveNeonMembers();
-  const emails = members
-    .map((member) => member.email?.trim().toLowerCase())
-    .filter((email): email is string => Boolean(email));
-  const priorByEmail = await loadPriorStateByEmail(emails, organizationId);
 
-  return { members, organizationId, priorByEmail };
-}
-
-/**
- * Reconcile: find members whose Neon membership has lapsed and strip their MEMBER
- * role. A member is "lapsed" when they hold MEMBER in the workspace, were
- * provisioned FROM Neon (their `neonAccountId` is stamped), are NOT exempt, and
- * are NOT in the current active-member set. Admin-invited non-Neon members
- * (exempt, or with no Neon id) are never touched. Reversible — a later sync
- * re-adds MEMBER when they renew.
- *
- * @param activeEmails - Lowercased emails of currently-active Neon members
- * @param organizationId - The member workspace
- * @param apply - `false` (preview) only counts; `true` removes the role
- * @returns How many members were (or would be) deactivated
- */
-async function reconcileLapsedMembers(
-  activeEmails: Set<string>,
-  organizationId: string,
-  apply: boolean
-): Promise<number> {
-  const currentMembers = await db.userOrganization.findMany({
-    where: {
-      organizationId,
-      roles: { has: OrganizationRoles.MEMBER },
-      membershipCheckExempt: false,
-      user: { neonAccountId: { not: null } },
-    },
-    select: { id: true, roles: true, user: { select: { email: true } } },
-  });
-
-  const lapsed = currentMembers.filter(
-    (membership) => !activeEmails.has(membership.user.email.toLowerCase())
-  );
-
-  if (apply) {
-    for (const membership of lapsed) {
-      const newRoles = membership.roles.filter(
-        (role) => role !== OrganizationRoles.MEMBER
-      );
-      // Swallow per-row errors — one failed downgrade must not abort the sync;
-      // the next run reconciles it. Empty roles = no member access (handled).
-      await db.userOrganization
-        .updateMany({
-          // Org-scoped (the ids already came from an organizationId-filtered
-          // query above); updateMany permits the composite where.
-          where: { id: membership.id, organizationId },
-          data: { roles: { set: newRoles } },
-        })
-        .catch(() => undefined);
+  // Dedupe by lowercased email — the unique key — keeping the last seen record.
+  // `listActiveNeonMembers` already dropped members with no email and deduped by
+  // account id, but two accounts could share an email; the map collapses those.
+  const byEmail = new Map<
+    string,
+    {
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      neonAccountId: string;
     }
-  }
-
-  return lapsed.length;
-}
-
-/** Lowercased active-member email set, for reconcile lookups. */
-function toActiveEmailSet(members: { email?: string | null }[]): Set<string> {
-  return new Set(
-    members
-      .map((member) => member.email?.trim().toLowerCase())
-      .filter((email): email is string => Boolean(email))
-  );
-}
-
-/**
- * READ-ONLY preview: reports how many members would be created / attached /
- * skipped without writing anything. Safe to run anytime.
- *
- * @returns The projected {@link NeonSyncResult} (`previewOnly: true`)
- * @throws {ShelfError} If Neon or the member workspace isn't configured
- */
-export async function previewNeonMemberSync(): Promise<NeonSyncResult> {
-  const { members, organizationId, priorByEmail } =
-    await loadMembersAndPriorState();
-
-  const result: NeonSyncResult = {
-    totalActive: members.length,
-    created: 0,
-    attached: 0,
-    skipped: 0,
-    failed: 0,
-    deactivated: 0,
-    previewOnly: true,
-    errors: [],
-  };
-
+  >();
   for (const member of members) {
-    const email = member.email?.trim().toLowerCase();
+    const email = normalizeEmail(member.email);
     if (!email) {
-      result.failed++;
       continue;
     }
-    const prior = priorByEmail.get(email);
-    if (!prior) {
-      result.created++;
-    } else if (!prior.alreadyMember) {
-      result.attached++;
-    } else {
-      result.skipped++;
-    }
+    byEmail.set(email, {
+      email,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      neonAccountId: member.neonAccountId,
+    });
   }
 
-  // Project how many current Neon-provisioned members would be deactivated.
-  result.deactivated = await reconcileLapsedMembers(
-    toActiveEmailSet(members),
-    organizationId,
-    false
-  );
+  const syncedAt = new Date();
+  const rows = [...byEmail.values()].map((row) => ({ ...row, syncedAt }));
 
-  return result;
-}
-
-/**
- * Provisions/refreshes every active Neon member as a MEMBER in the workspace.
- * Idempotent: users already holding MEMBER are left untouched (only their Neon
- * id is back-filled), so re-running never duplicates roles.
- *
- * @returns The actual {@link NeonSyncResult} (`previewOnly: false`)
- * @throws {ShelfError} If Neon or the member workspace isn't configured
- */
-export async function syncNeonMembers(): Promise<NeonSyncResult> {
-  const { members, organizationId, priorByEmail } =
-    await loadMembersAndPriorState();
-
-  const result: NeonSyncResult = {
-    totalActive: members.length,
-    created: 0,
-    attached: 0,
-    skipped: 0,
-    failed: 0,
-    deactivated: 0,
-    previewOnly: false,
-    errors: [],
-  };
-
-  for (const member of members) {
-    const email = member.email?.trim().toLowerCase();
-    if (!email) {
-      result.failed++;
-      continue;
-    }
-
-    try {
-      const prior = priorByEmail.get(email);
-
-      if (prior?.alreadyMember) {
-        // Already a member — only back-fill the Neon id if it's missing.
-        await stampNeonId(email, member.neonAccountId, prior.hasNeonId);
-        result.skipped++;
-        continue;
-      }
-
-      // New user OR an existing user without the MEMBER role: create/attach.
-      // (Skipping this when alreadyMember avoids the roles `push` duplication.)
-      await createUserOrAttachOrg({
-        email,
-        organizationId,
-        roles: [OrganizationRoles.MEMBER],
-        password: `${randomUUID()}${randomUUID()}`,
-        firstName: member.firstName,
-        lastName: member.lastName ?? undefined,
-        createdWithInvite: true,
-      });
-      await stampNeonId(email, member.neonAccountId, prior?.hasNeonId ?? false);
-
-      if (prior) {
-        result.attached++;
-      } else {
-        result.created++;
-      }
-    } catch (cause) {
-      result.failed++;
-      if (result.errors.length < MAX_REPORTED_ERRORS) {
-        result.errors.push({
-          email,
-          message: cause instanceof Error ? cause.message : "Unknown error",
+  // Replace the whole table atomically: clear it, then bulk-insert the current
+  // active set. Two statements (+ chunked inserts) instead of one round-trip per
+  // member, so a large roster can't blow Prisma's default interactive-transaction
+  // timeout (P2028) — which would roll the sync back and leave enforcement with
+  // an empty allowlist. Concurrent readers see the pre-commit state (MVCC), so
+  // there's never a window where the allowlist looks empty. `createdAt` is not
+  // meaningful for a snapshot table, so delete+insert is fine.
+  const CHUNK_SIZE = 500;
+  await db.$transaction(
+    async (tx) => {
+      await tx.neonAllowlistMember.deleteMany({});
+      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+        await tx.neonAllowlistMember.createMany({
+          data: rows.slice(i, i + CHUNK_SIZE),
+          skipDuplicates: true,
         });
       }
-    }
-  }
-
-  // Reconcile: strip MEMBER from Neon-provisioned members who are no longer in
-  // the active set. Exempt / non-Neon (admin-invited) members are untouched.
-  result.deactivated = await reconcileLapsedMembers(
-    toActiveEmailSet(members),
-    organizationId,
-    true
+    },
+    { timeout: 60_000 }
   );
 
-  return result;
+  return { activeCount: rows.length };
+}
+
+/**
+ * Reads the allowlist status for the admin UI. Cheap; never throws for an empty
+ * or never-synced table (returns 0 / null).
+ *
+ * @returns The current row count and the most recent sync time
+ */
+export async function getNeonAllowlistStatus(): Promise<NeonAllowlistStatus> {
+  const [activeCount, latest] = await Promise.all([
+    db.neonAllowlistMember.count(),
+    db.neonAllowlistMember.findFirst({
+      orderBy: { syncedAt: "desc" },
+      select: { syncedAt: true },
+    }),
+  ]);
+
+  return { activeCount, lastSyncedAt: latest?.syncedAt ?? null };
+}
+
+/**
+ * Looks up a member on the synced allowlist by email (case-insensitive).
+ *
+ * @param email - The email to look up
+ * @returns The allowlist row, or `null` when the email isn't on the list
+ */
+export async function findNeonAllowlistMemberByEmail(
+  email: string
+): Promise<NeonAllowlistMember | null> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) {
+    return null;
+  }
+  return db.neonAllowlistMember.findUnique({ where: { email: normalized } });
+}
+
+/**
+ * True when the email is on the synced active-member allowlist. The fast,
+ * offline-safe check the reserve gate and signup cross-reference enforce against.
+ *
+ * @param email - The email to check
+ * @returns Whether the email is currently on the allowlist
+ */
+export async function isEmailOnNeonAllowlist(email: string): Promise<boolean> {
+  const normalized = normalizeEmail(email);
+  if (!normalized) {
+    return false;
+  }
+  const count = await db.neonAllowlistMember.count({
+    where: { email: normalized },
+  });
+  return count > 0;
 }

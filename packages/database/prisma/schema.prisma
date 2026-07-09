@@ -2184,3 +2184,37 @@ model BookingReminderLog {
   @@index([bookingId, type])
   @@index([organizationId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BIG: Neon member allowlist (synced active-member snapshot)
+// Additive-only. One row per ACTIVE Neon member, refreshed by the admin
+// "Sync members from Neon" action (app/modules/big-neon-sync/). This table is
+// the source of truth the app enforces against — email on the list ⇒ active
+// member — so the reserve gate and the signup cross-reference never make a live
+// Neon API call. The sync REPLACES the set each run (upsert current, delete
+// stale). It creates NO login accounts, NO Supabase users, and NO passwords —
+// people still sign in by their own method (Google / Microsoft / email OTP) and
+// are only cross-referenced against this list.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A snapshot of one active Neon member. `email` is stored lowercased and is the
+/// unique key the reserve gate and the signup cross-reference match on. Rows are
+/// created/refreshed and pruned wholesale by each sync run; they are never a
+/// login credential.
+model NeonAllowlistMember {
+  id String @id @default(cuid())
+
+  /// Lowercased primary email — the key enforcement matches on.
+  email     String  @unique
+  firstName String?
+  lastName  String?
+  /// Neon's canonical Account ID (stored as a string). Stamped onto the User's
+  /// `neonAccountId` when the member is provisioned via their chosen login.
+  neonAccountId String?
+  /// When this row was last (re)confirmed active by a sync run.
+  syncedAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([neonAccountId])
+}

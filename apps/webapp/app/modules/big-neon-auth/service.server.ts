@@ -18,17 +18,20 @@
  * @see {@link file://./../../routes/_auth+/neon.callback.tsx}
  */
 import { randomUUID } from "node:crypto";
-import { OrganizationRoles } from "@prisma/client";
+import { OrganizationRoles, type NeonAllowlistMember } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import {
   isNeonApiConfigured,
-  resolveNeonMemberByEmail,
   type NeonMember,
 } from "~/integrations/neon-crm/client.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { mapAuthSession } from "~/modules/auth/mappers.server";
+import {
+  findNeonAllowlistMemberByEmail,
+  isEmailOnNeonAllowlist,
+} from "~/modules/big-neon-sync/service.server";
 import { createUserOrAttachOrg } from "~/modules/user/service.server";
 import { NEON_MEMBER_ORG_ID, SESSION_SECRET } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
@@ -206,29 +209,32 @@ export async function provisionAndMintNeonSession(
 }
 
 /**
- * Self-signup gate: requires an ACTIVE Neon membership for `email`.
+ * Self-signup gate: cross-references `email` against the synced active-member
+ * allowlist (the `NeonAllowlistMember` table refreshed by the admin sync). No
+ * live Neon API call — the admin re-syncs to refresh membership.
  *
  * - If the Neon API isn't configured (e.g. local dev before creds are wired),
  *   returns `null` WITHOUT blocking — so signup keeps working until Neon is set
- *   up. Once configured, an active membership becomes mandatory.
- * - If configured but no active member matches the email, throws 403.
+ *   up. Once configured, being on the synced allowlist becomes mandatory.
+ * - If configured but the email isn't on the allowlist, throws 403.
  *
  * Staff don't go through self-signup (they're invited), so this gate only
  * affects the member self-signup path.
  *
  * @param email - The email the person is trying to sign up with
- * @returns The resolved active {@link NeonMember}, or `null` when Neon is unconfigured
- * @throws {ShelfError} 403 when Neon is configured and no active member matches
+ * @returns The matched {@link NeonAllowlistMember} (its name / account id are used
+ *   to provision the member), or `null` when Neon is unconfigured
+ * @throws {ShelfError} 403 when Neon is configured and the email isn't on the allowlist
  */
 export async function assertActiveNeonMemberForSignup(
   email: string
-): Promise<NeonMember | null> {
+): Promise<NeonAllowlistMember | null> {
   if (!isNeonApiConfigured()) {
     return null;
   }
 
-  const member = await resolveNeonMemberByEmail(email);
-  if (!member || !member.isActiveMember) {
+  const member = await findNeonAllowlistMemberByEmail(email);
+  if (!member) {
     throw new ShelfError({
       cause: null,
       title: "Active membership required",
@@ -243,18 +249,18 @@ export async function assertActiveNeonMemberForSignup(
 }
 
 /**
- * Best-effort: stamp a freshly-created user with their Neon Account ID. Never
- * throws — a failed link must not break signup/login; a later Neon login or a
- * sync will reconcile it.
+ * Best-effort: stamp a freshly-created user with their Neon Account ID from the
+ * synced allowlist. Never throws — a failed link must not break signup/login; a
+ * later Neon login or a sync will reconcile it.
  *
- * @param email - The user's email (finds both the shelf user and the Neon record)
+ * @param email - The user's email (finds both the shelf user and the allowlist row)
  */
 export async function linkNeonAccountByEmail(email: string): Promise<void> {
   try {
     if (!isNeonApiConfigured()) {
       return;
     }
-    const member = await resolveNeonMemberByEmail(email);
+    const member = await findNeonAllowlistMemberByEmail(email);
     if (member?.neonAccountId) {
       await db.user.update({
         where: { email },
@@ -270,17 +276,18 @@ export async function linkNeonAccountByEmail(email: string): Promise<void> {
  * Reservation gate. A MEMBER may reserve only when they are either
  * (a) exempt from the membership check — an admin-invited non-Neon user
  * (volunteer, partner) whose `UserOrganization.membershipCheckExempt` is set —
- * or (b) a currently ACTIVE Neon member. Non-MEMBER roles (staff) are never
- * gated here.
+ * or (b) on the synced active-member allowlist (`NeonAllowlistMember`, refreshed
+ * by the admin sync). Non-MEMBER roles (staff) are never gated here.
  *
  * Enforced independently of how they logged in (Google, email, Neon, SSO), so a
- * lapsed member can't keep reserving. Fails OPEN if the Neon API is unreachable
- * (a Neon outage must not block reservations) but fails CLOSED on a definitive
- * "not an active member".
+ * lapsed member can't keep reserving. The check is a local table lookup — no
+ * live Neon call — so it's fast and offline-safe; the admin re-syncs to refresh
+ * membership. Fails OPEN only if the local lookup itself errors (a DB blip must
+ * not block reservations) but fails CLOSED on a definitive "not on the list".
  *
  * @param args.userId - The reserving user (the booking's creator)
  * @param args.organizationId - The workspace the reservation is in
- * @throws {ShelfError} 403 when a non-exempt MEMBER has no active Neon membership
+ * @throws {ShelfError} 403 when a non-exempt MEMBER is not on the active-member allowlist
  */
 export async function assertMemberCanReserve({
   userId,
@@ -312,17 +319,16 @@ export async function assertMemberCanReserve({
   }
 
   try {
-    const member = await resolveNeonMemberByEmail(membership.user.email);
-    if (member?.isActiveMember) {
-      return; // active Neon member → allowed
+    if (await isEmailOnNeonAllowlist(membership.user.email)) {
+      return; // on the synced active-member allowlist → allowed
     }
   } catch (cause) {
-    // Neon unreachable → fail OPEN so an outage doesn't block reservations.
+    // Local lookup errored → fail OPEN so a DB blip doesn't block reservations.
     Logger.error(
       new ShelfError({
         cause,
         message:
-          "Neon membership check failed at reservation time; allowing the reservation (fail-open).",
+          "Neon allowlist check failed at reservation time; allowing the reservation (fail-open).",
         additionalData: { userId, organizationId },
         label,
       })
@@ -330,7 +336,7 @@ export async function assertMemberCanReserve({
     return;
   }
 
-  // Definitive: no active Neon membership and not exempt → block.
+  // Definitive: not on the active-member allowlist and not exempt → block.
   throw new ShelfError({
     cause: null,
     title: "Active membership required",
