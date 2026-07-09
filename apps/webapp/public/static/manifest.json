@@ -2,7 +2,7 @@
   "name": "BIG Shelf",
   "lang": "en-US",
   "short_name": "BIG Shelf",
-  "description": "Open Source Asset and Equipment tracking software that lets you create QR asset labels, manage and overview your assets across locations.",
+  "description": "Reserve equipment and rooms at Brookline Interactive Group — scan gear, build an order, and book in seconds.",
   "start_url": "/",
   "display": "standalone",
   "scope": "/",
@@ -10,10 +10,22 @@
   "background_color": "#FFFFFF",
   "icons": [
     {
-      "src": "/static/images/big/big-shelf-symbol.png",
+      "src": "/static/images/big/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/images/big/app-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/static/images/big/app-icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

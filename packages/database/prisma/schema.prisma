@@ -2128,6 +2128,37 @@ model AssetConditionImage {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BIG: Asset guides
+// Additive-only — plain organizationId/assetId columns (no relations on the
+// upstream Asset model). Admin-managed learning content per asset: links to
+// manuals and embedded video explainers, rendered on the member equipment
+// info page (/reserve/equipment/:assetId). App-layer org-scoping.
+// See app/modules/big-equipment/.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AssetGuideKind {
+  MANUAL // a manual / spec sheet / how-to document link
+  VIDEO // a video explainer (YouTube/Vimeo URLs render as embeds)
+  LINK // any other helpful link
+}
+
+model AssetGuide {
+  id             String         @id @default(cuid())
+  organizationId String
+  assetId        String
+  kind           AssetGuideKind @default(LINK)
+  title          String
+  url            String
+  sortOrder      Int            @default(0)
+  createdById    String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([assetId])
+  @@index([organizationId, assetId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BIG: Equipment waitlists
 // Additive-only — plain FK columns to Asset/User/Organization (no relations on
 // those upstream models). A member joins the waitlist for an asset that is

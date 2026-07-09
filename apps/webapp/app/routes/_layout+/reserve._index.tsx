@@ -25,7 +25,12 @@
  * @see {@link file://./../../modules/big-kiosk-content/service.server.ts} — news/promos/closed days
  */
 import { AssetStatus, BookingStatus } from "@prisma/client";
-import { DoorOpenIcon, VideoIcon } from "lucide-react";
+import {
+  DoorOpenIcon,
+  ScanLineIcon,
+  SmartphoneIcon,
+  VideoIcon,
+} from "lucide-react";
 import { DateTime } from "luxon";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, Link, useLoaderData } from "react-router";
@@ -231,7 +236,8 @@ export default function MemberHomeDashboard() {
     closedDays,
   } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
-  const justBooked = searchParams.get("booked") === "1";
+  // "1" = a room was just booked; "order" = an equipment order was reserved.
+  const justBooked = searchParams.get("booked");
 
   return (
     <div>
@@ -243,9 +249,11 @@ export default function MemberHomeDashboard() {
             role="status"
             className="rounded border border-success-200 bg-success-50 p-3 text-sm text-success-700"
           >
-            <span className="font-medium">Room reserved!</span> You&apos;ll find
-            it under &ldquo;Coming up&rdquo; below, and a confirmation email is
-            on its way.
+            <span className="font-medium">
+              {justBooked === "order" ? "Order reserved!" : "Room reserved!"}
+            </span>{" "}
+            You&apos;ll find it under &ldquo;Coming up&rdquo; below, and a
+            confirmation email is on its way.
           </div>
         ) : null}
 
@@ -263,8 +271,8 @@ export default function MemberHomeDashboard() {
           </p>
         </div>
 
-        {/* The two big actions */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {/* The big actions */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Link
             to="/reserve/equipment"
             className="group flex items-start gap-4 rounded-lg border border-gray-200 bg-white p-5 shadow-sm transition hover:border-primary-300 hover:shadow-md"
@@ -300,6 +308,24 @@ export default function MemberHomeDashboard() {
                   : `${freeNowCount} of ${rooms.length} room${
                       rooms.length === 1 ? " is" : "s are"
                     } free right now.`}
+              </span>
+            </span>
+          </Link>
+
+          <Link
+            to="/reserve/scan"
+            className="group flex items-start gap-4 rounded-lg border border-gray-200 bg-white p-5 shadow-sm transition hover:border-violet-300 hover:shadow-md"
+          >
+            <span className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600">
+              <ScanLineIcon className="size-6" aria-hidden />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-base font-semibold text-gray-900 group-hover:text-violet-700">
+                Scan to reserve
+              </span>
+              <span className="mt-1 block text-sm text-gray-600">
+                Point your camera at any gear label to see details and add it to
+                an order.
               </span>
             </span>
           </Link>
@@ -448,6 +474,21 @@ export default function MemberHomeDashboard() {
             No rooms have been set up yet.
           </p>
         )}
+
+        {/* Put BIG Shelf on the phone's home screen */}
+        <Link
+          to="/reserve/app"
+          className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm transition hover:border-primary-300 md:px-6"
+        >
+          <SmartphoneIcon
+            className="size-5 shrink-0 text-primary-600"
+            aria-hidden
+          />
+          <span className="min-w-0">
+            Use BIG Shelf like an app — add it to your phone&apos;s home screen.{" "}
+            <span className="font-medium text-primary-700">Show me how</span>
+          </span>
+        </Link>
       </div>
     </div>
   );

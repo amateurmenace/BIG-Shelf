@@ -20,6 +20,7 @@
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { data, Link, Outlet } from "react-router";
+import { OrderBar } from "~/components/big/reserve/order-bar";
 import { ErrorContent } from "~/components/errors";
 import { requireMemberPortalAccess } from "~/modules/big-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -66,10 +67,17 @@ export const handle = {
 };
 
 /**
- * Member portal section layout component. Renders the matched portal page.
+ * Member portal section layout component. Renders the matched portal page
+ * plus the floating scan-to-reserve order bar (shows only while the member's
+ * cart has items).
  */
 export default function MemberPortalSection() {
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <OrderBar />
+    </>
+  );
 }
 
 export const ErrorBoundary = () => <ErrorContent />;

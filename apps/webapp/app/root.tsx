@@ -47,7 +47,9 @@ export const handle = {
 
 export const links: LinksFunction = () => [
   { rel: "manifest", href: "/static/manifest.json" },
-  { rel: "apple-touch-icon", href: config.faviconPath },
+  // BIG: proper home-screen icon (180px, white background) — iOS uses this
+  // when members "Add to Home Screen"; the favicon stays the browser-tab icon.
+  { rel: "apple-touch-icon", href: "/static/images/big/app-icon-180.png" },
   { rel: "icon", href: config.faviconPath },
   ...splashScreenLinks,
   { rel: "stylesheet", href: styles },

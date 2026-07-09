@@ -31,6 +31,10 @@ import {
   validateBarcodeValue,
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
+import {
+  getCurrentOrganizationRole,
+  isMemberRole,
+} from "~/modules/big-member/service.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -69,12 +73,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
+    const {
+      organizationId,
+      userOrganizations,
+      role: currentRole,
+    } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.read,
     });
+
+    // BIG: members belong on the anonymized equipment info page, not the
+    // staff asset page (which shows custody/location). This is also where a
+    // phone-camera QR scan lands (the /qr resolver redirects here), so the
+    // member scan-a-label flow ends up in the right place.
+    if (isMemberRole(currentRole)) {
+      throw redirect(`/reserve/equipment/${id}`);
+    }
 
     const asset = await getAsset({
       id,
@@ -97,6 +113,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
     });
   } catch (cause) {
+    if (cause instanceof Response) {
+      throw cause;
+    }
+
+    // BIG: if a member couldn't read this page (e.g. the permission matrix
+    // tightens), still send them to the member equipment info page instead
+    // of a 403 dead end — this is where phone-camera QR scans land.
+    const memberRole = await getCurrentOrganizationRole({
+      userId,
+      request,
+    }).catch(() => null);
+    if (isMemberRole(memberRole)) {
+      throw redirect(`/reserve/equipment/${id}`);
+    }
+
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
   }
@@ -324,13 +355,17 @@ export default function AssetDetailsPage() {
     })
       ? [{ to: "reminders", content: "Reminders" }]
       : []),
-    // BIG: condition & maintenance log — staff (asset:update) only.
+    // BIG: condition & maintenance log + member-facing guides — staff
+    // (asset:update) only.
     ...(userHasPermission({
       roles,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     })
-      ? [{ to: "condition", content: "Condition" }]
+      ? [
+          { to: "condition", content: "Condition" },
+          { to: "guides", content: "Guides" },
+        ]
       : []),
   ];
 

@@ -15,13 +15,15 @@
  * @see {@link file://./../../modules/big-waitlist/service.server.ts} — waitlist logic
  */
 import { AssetStatus } from "@prisma/client";
-import { PackageIcon } from "lucide-react";
+import { PackageIcon, ScanLineIcon } from "lucide-react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
 import { data, Form, Link, useLoaderData } from "react-router";
+import { ClientOnly } from "remix-utils/client-only";
+import { AddToOrderButton } from "~/components/big/reserve/add-to-order-button";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -286,19 +288,27 @@ export default function ReserveEquipmentCatalog() {
             <h2 className="text-sm font-semibold text-gray-900">
               Browse equipment
             </h2>
-            <Form method="get" className="flex items-center gap-2">
-              <input
-                type="search"
-                name="q"
-                defaultValue={search}
-                placeholder="Search equipment…"
-                aria-label="Search equipment"
-                className="h-9 w-full rounded border border-gray-300 px-3 text-sm md:w-64"
-              />
-              <Button type="submit" variant="secondary">
-                Search
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Form method="get" className="flex items-center gap-2">
+                <input
+                  type="search"
+                  name="q"
+                  defaultValue={search}
+                  placeholder="Search equipment…"
+                  aria-label="Search equipment"
+                  className="h-9 w-full rounded border border-gray-300 px-3 text-sm md:w-64"
+                />
+                <Button type="submit" variant="secondary">
+                  Search
+                </Button>
+              </Form>
+              <Button to="/reserve/scan" variant="secondary">
+                <span className="inline-flex items-center gap-1.5">
+                  <ScanLineIcon className="size-4" aria-hidden />
+                  Scan
+                </span>
               </Button>
-            </Form>
+            </div>
           </div>
 
           {equipment.length === 0 ? (
@@ -313,34 +323,33 @@ export default function ReserveEquipmentCatalog() {
                 const image = item.mainImage ?? item.thumbnailImage;
                 const isAvailable = item.status === "AVAILABLE";
                 const onWaitlist = waitlistedAssetIds.includes(item.id);
-                const reservePath = `/assets/${item.id}/overview/create-new-booking`;
+                const infoPath = `/reserve/equipment/${item.id}`;
                 return (
                   <li
                     key={item.id}
                     className="group flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-lg"
                   >
-                    {/* Photo — links straight into the reserve flow when free */}
-                    {isAvailable ? (
-                      <Link
-                        to={reservePath}
-                        className="relative block aspect-[4/3] overflow-hidden bg-gray-50"
-                        aria-label={`Reserve ${item.title}`}
-                      >
-                        <EquipmentImage image={image} available={isAvailable} />
-                      </Link>
-                    ) : (
-                      <div className="relative aspect-[4/3] overflow-hidden bg-gray-50">
-                        <EquipmentImage image={image} available={isAvailable} />
+                    {/* Photo — opens the item's info page (guides, big photo) */}
+                    <Link
+                      to={infoPath}
+                      className="relative block aspect-[4/3] overflow-hidden bg-gray-50"
+                      aria-label={`About ${item.title}`}
+                    >
+                      <EquipmentImage image={image} available={isAvailable} />
+                      {!isAvailable ? (
                         <span className="absolute left-2 top-2 rounded-full bg-gray-900/70 px-2 py-0.5 text-xs font-medium text-white backdrop-blur">
                           {ASSET_STATUS_LABEL[item.status] ?? "Unavailable"}
                         </span>
-                      </div>
-                    )}
+                      ) : null}
+                    </Link>
 
                     <div className="flex flex-1 flex-col gap-2 p-3 md:p-4">
-                      <p className="line-clamp-2 text-sm font-medium text-gray-900">
+                      <Link
+                        to={infoPath}
+                        className="line-clamp-2 text-sm font-medium text-gray-900 hover:text-primary-700"
+                      >
                         {item.title}
-                      </p>
+                      </Link>
                       {item.category ? (
                         <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
                           <span
@@ -357,11 +366,20 @@ export default function ReserveEquipmentCatalog() {
                         </span>
                       )}
 
-                      <div className="mt-auto pt-2">
+                      <div className="mt-auto flex flex-col gap-1.5 pt-2">
                         {isAvailable ? (
-                          <Button to={reservePath} size="sm" width="full">
-                            Reserve
-                          </Button>
+                          <ClientOnly fallback={<div className="h-8" />}>
+                            {() => (
+                              <AddToOrderButton
+                                item={{
+                                  id: item.id,
+                                  title: item.title,
+                                  image: item.thumbnailImage ?? item.mainImage,
+                                }}
+                                className="w-full"
+                              />
+                            )}
+                          </ClientOnly>
                         ) : onWaitlist ? (
                           <span className="block rounded border border-gray-200 py-1.5 text-center text-xs font-medium text-gray-500">
                             On waitlist

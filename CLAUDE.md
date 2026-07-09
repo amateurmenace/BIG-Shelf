@@ -38,6 +38,31 @@ additions on top of upstream's changes.
   edits: the `home.tsx` MEMBER→`/reserve` redirect and the sidebar nav hook
   (members get a focused Home / Reserve equipment / Book a room / My
   reservations nav).
+- **Member scan-to-reserve + equipment info pages + PWA** — the mobile-first
+  "walk the shelves" flow: `/reserve/scan` (reuses the shared `CodeScanner`;
+  QR / barcode / SAM-ID resolved org-scoped by `resolveScannedCode` — foreign
+  labels are never resolvable), landing on `/reserve/equipment/:assetId`
+  (anonymized info page: large photo, availability, description, and
+  admin-managed **guides** — manual/doc links plus YouTube/Vimeo video
+  explainers embedded via the allowlist-only `videoEmbedUrl`; everything else
+  renders as a plain link, never an iframe). Members build a multi-item
+  **order** (localStorage Jotai cart + floating `OrderBar` in the portal
+  layout) and check out at `/reserve/order`, which re-validates every id
+  server-side and composes upstream `createBooking`→`reserveBooking` via
+  `createEquipmentReservation` (Neon gate, conflicts, emails, loan agreement
+  all fire). NOTE: the checkout's hidden cart field is `orderAssetIds` — the
+  shared `BookingFormSchema` owns the `assetIds` name (array) and a JSON
+  string under that name fails its validation. Guides are staff-managed on
+  the asset page's **Guides** tab (`assets.$assetId.guides.tsx`, additive
+  `AssetGuide` table). PWA: `static/manifest.json` + generated
+  `app-icon-*` images + `/reserve/app` add-to-home-screen instructions.
+  Additive: `app/modules/big-equipment/` (`service.server.ts` + client-safe
+  `shared.ts`), `app/atoms/big-equipment-order.ts`,
+  `app/components/big/reserve/{add-to-order-button,order-bar}.tsx`, the
+  `reserve.scan/equipment_.$assetId/order/app` routes. Core edits: the asset
+  page tab list + a MEMBER→info-page redirect in `assets.$assetId.tsx`
+  (members otherwise see the staff page with custody/location), catalog card
+  CTAs, the dashboard action grid, `root.tsx` apple-touch-icon.
 - **Room booking flow + week-ahead digest + kiosk wallboard** — a dedicated
   "book a room" pipeline (`app/modules/big-room-booking/`) that composes
   upstream `createBooking` → `updateBookingRooms` → `reserveBooking` (so the
