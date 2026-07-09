@@ -312,6 +312,16 @@ export default function BookingsIndexPage({
     >
       {!isChildBookingsPage ? (
         <Header>
+          {/* BIG: rooms have their own booking flow (pick a room → pick a
+              time) — surface it beside the generic equipment booking. */}
+          <Button
+            to="/rooms"
+            variant="secondary"
+            aria-label="book a room"
+            prefetch="none"
+          >
+            Book a room
+          </Button>
           <CreateBookingDialog
             trigger={
               <Button

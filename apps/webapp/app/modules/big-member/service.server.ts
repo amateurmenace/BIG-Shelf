@@ -14,8 +14,12 @@
  * @see {@link file://./../../utils/roles.server.ts} — requirePermission / role resolution
  */
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { redirect } from "react-router";
 import { db } from "~/database/db.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
+import type { PermissionAction } from "~/utils/permissions/permission.data";
+import { PermissionEntity } from "~/utils/permissions/permission.data";
+import { requirePermission } from "~/utils/roles.server";
 
 /**
  * Resolves the caller's role in their currently-selected organization WITHOUT
@@ -60,6 +64,53 @@ export function isMemberRole(role: OrganizationRoles | null): boolean {
   return role === OrganizationRoles.MEMBER;
 }
 
+/**
+ * The shared gate for every member-portal route (`/reserve` and children).
+ *
+ * Enforces the `booking` permission for the requested action, then applies
+ * the portal's audience rule: MEMBERs (the portal's audience) and
+ * ADMIN/OWNER (staff previewing the member experience) may proceed; other
+ * restricted roles (BASE / SELF_SERVICE) are redirected to the standard
+ * bookings UI they already use.
+ *
+ * Centralized here so the rule cannot drift as portal sub-pages multiply
+ * (dashboard, equipment catalog, room picker, room booking form).
+ *
+ * @param args.userId - The authenticated user
+ * @param args.request - The incoming request
+ * @param args.action - The booking permission to require (read for pages,
+ *   create for booking actions)
+ * @returns Everything `requirePermission` returns, plus `isStaff`
+ * @throws {Response} A redirect to `/bookings` for non-portal roles
+ * @throws {ShelfError} 403 when the booking permission is missing entirely
+ */
+export async function requireMemberPortalAccess({
+  userId,
+  request,
+  action,
+}: {
+  userId: string;
+  request: Request;
+  action: PermissionAction;
+}) {
+  const permission = await requirePermission({
+    userId,
+    request,
+    entity: PermissionEntity.booking,
+    action,
+  });
+
+  const isStaff =
+    permission.role === OrganizationRoles.ADMIN ||
+    permission.role === OrganizationRoles.OWNER;
+
+  if (permission.role !== OrganizationRoles.MEMBER && !isStaff) {
+    throw redirect("/bookings");
+  }
+
+  return { ...permission, isStaff };
+}
+
 /** Fallback color for rooms that don't have one set. */
 const DEFAULT_ROOM_COLOR = "#6b7280";
 
@@ -70,7 +121,13 @@ const ROOM_BUSY_STATUSES: BookingStatus[] = [
   BookingStatus.OVERDUE,
 ];
 
-/** A calendar event marking a room as reserved (unavailable) for a time window. */
+/**
+ * A calendar event marking a room as reserved (unavailable) for a time window.
+ *
+ * PRIVACY: deliberately carries no booking name or custodian — members may see
+ * WHEN a room is taken, never WHO booked it. Only the room's own name is
+ * exposed (as the event title and in `extendedProps.roomName`).
+ */
 export type RoomAvailabilityEvent = {
   id: string;
   title: string;
@@ -78,7 +135,7 @@ export type RoomAvailabilityEvent = {
   end: Date;
   backgroundColor: string;
   borderColor: string;
-  extendedProps: { roomName: string; bookingName: string };
+  extendedProps: { roomName: string };
 };
 
 /**
@@ -106,7 +163,8 @@ export async function getRoomAvailability({
       color: true,
       bookings: {
         where: { status: { in: ROOM_BUSY_STATUSES } },
-        select: { id: true, name: true, from: true, to: true },
+        // PRIVACY: no booking name/custodian — see RoomAvailabilityEvent.
+        select: { id: true, from: true, to: true },
       },
     },
     orderBy: { name: "asc" },
@@ -120,7 +178,7 @@ export async function getRoomAvailability({
       end: booking.to,
       backgroundColor: room.color ?? DEFAULT_ROOM_COLOR,
       borderColor: room.color ?? DEFAULT_ROOM_COLOR,
-      extendedProps: { roomName: room.name, bookingName: booking.name },
+      extendedProps: { roomName: room.name },
     }))
   );
 

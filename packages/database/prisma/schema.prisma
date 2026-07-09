@@ -2218,3 +2218,53 @@ model NeonAllowlistMember {
 
   @@index([neonAccountId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BIG: Kiosk wallboard content (see app/modules/big-kiosk-content/)
+//
+// Admin-managed content shown on the public /kiosk display: up to three
+// class/event promo cards (uploaded image + sign-up QR) and the welcoming
+// "become a member" card. Plain-FK (no relations to core tables) like the
+// other BIG additive models; org integrity is enforced in the app layer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One class/event promo card on the kiosk. At most three per organization are
+/// shown (enforced in the service layer, ordered by `sortOrder` then creation).
+model KioskPromo {
+  id             String @id @default(cuid())
+  organizationId String
+
+  /// Card heading, e.g. "Intro to Podcasting".
+  title String
+  /// Optional class/event date rendered on the card.
+  eventDate DateTime?
+  /// External sign-up URL — encoded into the card's QR code.
+  linkUrl String
+  /// Public URL of the uploaded promo image (Supabase public bucket)…
+  imageUrl String
+  /// …and its storage path, kept so deleting the promo can remove the file.
+  imagePath String
+
+  sortOrder   Int    @default(0)
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+/// Per-organization kiosk copy: the "become a member" card. The card renders
+/// on the kiosk only when `membershipSignupUrl` is set (the QR needs a target).
+model KioskConfig {
+  id             String @id @default(cuid())
+  organizationId String @unique
+
+  membershipHeadline  String?
+  membershipBlurb     String?
+  membershipSignupUrl String?
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

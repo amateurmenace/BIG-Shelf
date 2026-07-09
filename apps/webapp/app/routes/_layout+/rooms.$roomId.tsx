@@ -28,7 +28,10 @@ import type {
   MetaFunction,
 } from "react-router";
 import { data, redirect, Outlet, useLoaderData } from "react-router";
+import { ClientOnly } from "remix-utils/client-only";
 import { z } from "zod";
+import { RoomStatusChip } from "~/components/big/room-booking/room-status-chip";
+import { WeekStrip } from "~/components/big/room-booking/week-strip";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -36,6 +39,8 @@ import { DeleteRoom } from "~/components/rooms/delete-room";
 import { RoomBadge } from "~/components/rooms/room-badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { DateS } from "~/components/shared/date";
+import { getRoomsWithSchedule } from "~/modules/big-room-booking/service.server";
 import { deleteRoom, getRoom } from "~/modules/room/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -67,30 +72,40 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.room,
       action: PermissionAction.read,
     });
 
-    const room = await getRoom({
-      id: roomId,
-      organizationId,
-      include: {
-        // Tight select: the equipment list only needs id + title for the link.
-        assets: {
-          select: { id: true, title: true },
-          orderBy: { title: "asc" },
+    const [room, schedules] = await Promise.all([
+      getRoom({
+        id: roomId,
+        organizationId,
+        include: {
+          // Tight select: the equipment list only needs id + title for the link.
+          assets: {
+            select: { id: true, title: true },
+            orderBy: { title: "asc" },
+          },
         },
-      },
-    });
+      }),
+      // Live schedule for the availability card. Staff see who holds each
+      // slot; restricted roles (members can read rooms) get anonymized data.
+      getRoomsWithSchedule({
+        organizationId,
+        roomId,
+        horizonDays: 14,
+        includeDetails: !isSelfServiceOrBase,
+      }),
+    ]);
 
     const header: HeaderData = {
       title: room.name,
     };
 
-    return payload({ room, header });
+    return payload({ room, schedule: schedules[0] ?? null, header });
   } catch (cause) {
     const reason = makeShelfError(cause, { roomId, userId });
     throw data(error(reason), { status: reason.status });
@@ -174,7 +189,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
  * @returns The room detail layout.
  */
 export default function RoomDetails() {
-  const { room } = useLoaderData<typeof loader>();
+  const { room, schedule } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -192,10 +207,14 @@ export default function RoomDetails() {
         <DeleteRoom room={room} />
         <Button
           to={`/rooms/${room.id}/manage-equipment`}
-          variant="primary"
+          variant="secondary"
           icon="asset"
         >
           Manage equipment
+        </Button>
+        {/* BIG: booking is the room's primary action */}
+        <Button to={`/rooms/${room.id}/book`} variant="primary">
+          Book this room
         </Button>
       </Header>
 
@@ -234,8 +253,62 @@ export default function RoomDetails() {
           </Card>
         </div>
 
-        {/* Right column — room details */}
-        <div className="w-full space-y-4 md:w-[360px] lg:ml-4">
+        {/* Right column — availability + room details */}
+        <div className="mt-4 w-full space-y-4 md:w-[360px] lg:ml-4 lg:mt-0">
+          {schedule ? (
+            <Card className="my-0">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Availability
+                </h3>
+                <RoomStatusChip availability={schedule.availability} />
+              </div>
+
+              <ClientOnly fallback={<div className="h-10" />}>
+                {() => (
+                  <WeekStrip
+                    busyWindows={schedule.busyWindows}
+                    color={schedule.color}
+                  />
+                )}
+              </ClientOnly>
+
+              {schedule.busyWindows.length > 0 ? (
+                <ul className="mt-3 space-y-1.5 border-t border-gray-100 pt-3">
+                  {schedule.busyWindows.slice(0, 5).map((window) => (
+                    <li
+                      key={window.bookingId}
+                      className="flex min-w-0 items-baseline gap-2 text-sm text-gray-700"
+                    >
+                      <span className="shrink-0 tabular-nums text-gray-500">
+                        <DateS
+                          date={window.from}
+                          options={{
+                            weekday: "short",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          }}
+                        />
+                        {" – "}
+                        <DateS date={window.to} onlyTime />
+                      </span>
+                      <span className="truncate">
+                        {window.bookingName ?? "Reserved"}
+                        {window.custodianName
+                          ? ` · ${window.custodianName}`
+                          : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 border-t border-gray-100 pt-3 text-sm text-success-700">
+                  Free for the next two weeks.
+                </p>
+              )}
+            </Card>
+          ) : null}
+
           {room.description ? (
             <Card className="my-0">
               <div className="mb-2 text-sm font-semibold text-gray-900">

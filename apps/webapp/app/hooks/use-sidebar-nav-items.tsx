@@ -7,6 +7,7 @@ import {
   CalendarRangeIcon,
   ChartLineIcon,
   ClipboardCheckIcon,
+  DoorOpenIcon,
   FileBarChartIcon,
   HomeIcon,
   MapPinIcon,
@@ -106,10 +107,33 @@ export function useSidebarNavItems() {
       title: "Asset management",
     },
     {
-      // BIG: member-only entry point to the self-service reservation portal.
+      // BIG: the member portal nav — a focused set replacing the staff items
+      // below. Members land on their own dashboard (home.tsx redirects) and
+      // do everything from these four surfaces.
+      type: "child",
+      title: "Home",
+      to: "/reserve",
+      Icon: HomeIcon,
+      hidden: !isMember,
+    },
+    {
       type: "child",
       title: "Reserve equipment",
-      to: "/reserve",
+      to: "/reserve/equipment",
+      Icon: PackageOpenIcon,
+      hidden: !isMember,
+    },
+    {
+      type: "child",
+      title: "Book a room",
+      to: "/reserve/rooms",
+      Icon: DoorOpenIcon,
+      hidden: !isMember,
+    },
+    {
+      type: "child",
+      title: "My reservations",
+      to: "/me/bookings",
       Icon: CalendarRangeIcon,
       hidden: !isMember,
     },
@@ -125,18 +149,23 @@ export function useSidebarNavItems() {
       title: "Assets",
       to: "/assets",
       Icon: PackageOpenIcon,
+      // BIG: members browse equipment through the portal catalog instead.
+      hidden: isMember,
     },
     {
       type: "child",
       title: "Kits",
       to: "/kits",
       Icon: Package,
+      hidden: isMember,
     },
     {
       type: "child",
       title: "Rooms",
       to: "/rooms",
-      Icon: MapPinIcon,
+      Icon: DoorOpenIcon,
+      // BIG: members book rooms through the portal picker instead.
+      hidden: isMember,
     },
     {
       type: "child",
@@ -171,6 +200,8 @@ export function useSidebarNavItems() {
       title: "Bookings",
       Icon: CalendarRangeIcon,
       disabled: bookingDisabled,
+      // BIG: members manage reservations through the portal instead.
+      hidden: isMember,
       children: [
         {
           title: "View Bookings",
@@ -181,6 +212,21 @@ export function useSidebarNavItems() {
           title: "Calendar",
           to: "/calendar",
           disabled: bookingDisabled,
+        },
+        {
+          // BIG: printable 7-day digest (rooms, pickups, returns, overdue).
+          title: "Week ahead",
+          to: "/week-ahead",
+          disabled: bookingDisabled,
+          hidden: isBaseOrSelfService,
+        },
+        {
+          // BIG: the 16:9 touch wallboard — open on the lobby screen.
+          title: "Wallboard",
+          to: "/kiosk",
+          target: "_blank",
+          disabled: bookingDisabled,
+          hidden: isBaseOrSelfService,
         },
       ],
     },

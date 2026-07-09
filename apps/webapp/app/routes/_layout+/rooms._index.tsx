@@ -9,11 +9,13 @@
  *
  * The loader gates on `room:read` and shapes the payload for `<List>`
  * (`items`, `page`, `totalItems`, `totalPages`, `perPage`, `modelName`,
- * `search`). The action gates on `room:delete` and resolves the "delete"
- * intent submitted by {@link DeleteRoom} to {@link deleteRoom}.
+ * `search`), plus a per-room live availability map (chip + "Book" button per
+ * row — the staff room-booking entry point). The action gates on
+ * `room:delete` and resolves the "delete" intent submitted by
+ * {@link DeleteRoom} to {@link deleteRoom}.
  *
  * Simplified from the Kits index (`kits._index.tsx`): rooms have no
- * status/custody/QR filters, availability calendar, or bulk actions in the MVP.
+ * status/custody/QR filters or bulk actions in the MVP.
  *
  * @see {@link file://../../modules/room/service.server.ts} — room business logic
  * @see {@link file://../../components/rooms/room-badge.tsx} — the row badge
@@ -26,8 +28,9 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, Link, redirect } from "react-router";
+import { data, Link, redirect, useLoaderData } from "react-router";
 import { z } from "zod";
+import { RoomStatusChip } from "~/components/big/room-booking/room-status-chip";
 import Header from "~/components/layout/header";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
@@ -37,6 +40,7 @@ import { RoomBadge } from "~/components/rooms/room-badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getRoomsWithSchedule } from "~/modules/big-room-booking/service.server";
 import {
   deleteRoom,
   getPaginatedAndFilterableRooms,
@@ -91,6 +95,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       return redirect("/rooms");
     }
 
+    // Live "free / in use until" state per room for the Availability column.
+    // Details are not needed here (the chip shows state, not names), so the
+    // schedule is loaded anonymized regardless of role.
+    const schedules = await getRoomsWithSchedule({
+      organizationId,
+      horizonDays: 7,
+    });
+    const availabilityByRoomId = Object.fromEntries(
+      schedules.map((room) => [room.id, room.availability])
+    );
+
     const header = {
       title: "Rooms",
     };
@@ -104,6 +119,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       payload({
         header,
         items: rooms,
+        availabilityByRoomId,
         page,
         totalItems: totalRooms,
         totalPages,
@@ -229,6 +245,8 @@ export default function RoomsIndexPage() {
             <>
               <Th>Description</Th>
               <Th>Assets</Th>
+              <Th>Availability</Th>
+              <Th> </Th>
             </>
           }
         />
@@ -255,6 +273,9 @@ function ListContent({
     include: typeof ROOMS_INCLUDE_FIELDS;
   }>;
 }) {
+  const { availabilityByRoomId } = useLoaderData<typeof loader>();
+  const availability = availabilityByRoomId[item.id];
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -283,6 +304,16 @@ function ListContent({
 
       <Td>
         {item._count.assets} {item._count.assets === 1 ? "item" : "items"}
+      </Td>
+
+      <Td>
+        {availability ? <RoomStatusChip availability={availability} /> : null}
+      </Td>
+
+      <Td>
+        <Button to={`/rooms/${item.id}/book`} variant="secondary" size="sm">
+          Book
+        </Button>
       </Td>
     </>
   );

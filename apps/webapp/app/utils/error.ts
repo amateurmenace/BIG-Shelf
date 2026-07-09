@@ -114,7 +114,8 @@ export type FailureReason = {
     | "Waitlist" // BIG equipment waitlists
     | "Reminder" // BIG automated booking reminders
     | "Social Auth" // BIG Google/Microsoft social login
-    | "Room Calendar"; // BIG room bookings → Google Calendar push
+    | "Room Calendar" // BIG room bookings → Google Calendar push
+    | "Kiosk"; // BIG kiosk wallboard content (promos, membership card)
   /**
    * The message intended for the user.
    * You can add new lines using \n which will be parsed into paragraphs in the html

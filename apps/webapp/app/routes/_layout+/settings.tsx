@@ -69,6 +69,8 @@ export default function SettingsPage() {
     ...(!_isPersonalOrg
       ? [{ to: "room-calendar", content: "Room calendar" }]
       : []),
+    // BIG: kiosk wallboard content — promos + membership card (admin-only).
+    ...(!_isPersonalOrg ? [{ to: "kiosk", content: "Kiosk" }] : []),
   ];
 
   const { isBaseOrSelfService } = useUserRoleHelper();
@@ -84,6 +86,7 @@ export default function SettingsPage() {
           "emails",
           "member-sync",
           "room-calendar",
+          "kiosk",
         ].includes(item.to)
     );
   }

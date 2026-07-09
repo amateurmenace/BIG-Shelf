@@ -22,12 +22,42 @@ additions on top of upstream's changes.
 - **Member role** — a new `OrganizationRoles` value mirroring `SELF_SERVICE`,
   wired through the permission matrix, the invite/change-role UIs, and SSO
   mapping.
-- **Member self-service portal** (`/reserve`) — the MEMBER landing page: a
-  browse-and-reserve equipment catalog, the member's own reservations, and a
-  **room-availability calendar** (FullCalendar month/week showing when each room
-  is booked). Additive: `app/modules/big-member/`,
-  `app/routes/_layout+/reserve.tsx`. Core edits: the `home.tsx` MEMBER→`/reserve`
-  redirect and the sidebar nav hook.
+- **Member self-service portal** (`/reserve`) — the MEMBER landing surface, a
+  small multi-page app: a **home dashboard** (`reserve._index` — greeting, big
+  "Reserve equipment" / "Book a room" actions, upcoming reservations, and an
+  expandable room-availability calendar that is **anonymized**: members see
+  when rooms are taken, never who), an equipment catalog + waitlist
+  (`reserve.equipment`), and the room-booking flow (`reserve.rooms._index`
+  picker + `reserve.rooms.$roomId` form). Additive: `app/modules/big-member/`,
+  `app/routes/_layout+/reserve*.tsx`. Core edits: the `home.tsx`
+  MEMBER→`/reserve` redirect and the sidebar nav hook (members get a focused
+  Home / Reserve equipment / Book a room / My reservations nav).
+- **Room booking flow + week-ahead digest + kiosk wallboard** — a dedicated
+  "book a room" pipeline (`app/modules/big-room-booking/`) that composes
+  upstream `createBooking` → `updateBookingRooms` → `reserveBooking` (so the
+  Neon gate, conflict validation, emails, and the Google Calendar mirror all
+  fire) and adds **hard server-side room double-booking rejection** (upstream
+  only greys conflicts out in the manage-rooms picker). Surfaces: member form
+  (`reserve.rooms.$roomId`), staff form with custodian picker
+  (`rooms.$roomId_.book`), live "Free until 3:00 PM" chips + Book buttons on
+  the rooms index/detail, a printable staff digest (`/week-ahead`, gated
+  `dashboard:read`), and a full-screen anonymized 16:9 touch wallboard
+  (`app/routes/kiosk.tsx`, outside `_layout+`) with tap-a-slot walk-up booking
+  (membership email → custodian; kiosk device must be signed in as staff).
+  Shared UI in `app/components/big/room-booking/`. Core edits: rooms
+  index/detail rows, the bookings-index header button, the sidebar nav hook.
+  The wall also shows **admin-managed content** via the Settings → Kiosk CMS
+  (`settings.kiosk.tsx`, gated `generalSettings`, TEAM-only): up to three
+  class/event promo cards (uploaded image + sign-up QR; `KioskPromo` table),
+  a welcoming "become a member" banner (copy + QR target; `KioskConfig` table —
+  hidden until a sign-up URL is set), and a rolling 30-day closed-days
+  calendar derived from the org's Working Hours (weekly schedule + overrides —
+  one source of truth with booking validation). Layout: promos top strip,
+  schedule board middle, membership banner bottom, BIG Shelf logo on a white
+  chip in the masthead. Additive: `app/modules/big-kiosk-content/`
+  (`service.server.ts` + client-safe `shared.ts` — route components must
+  import constants/schemas from `shared`, never from the `.server` file, or
+  vite rejects the client bundle). Core edit: the settings tab list.
 - **Neon CRM integration + multi-path auth** — Neon CRM is the source of truth
   for WHO is an active member, mirrored into a local allowlist table
   (`NeonAllowlistMember`) by the admin "Sync members from Neon" action. The sync

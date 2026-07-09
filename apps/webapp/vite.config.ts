@@ -51,7 +51,9 @@ export default defineConfig({
     noExternal: ["@shelf/database"],
   },
   server: {
-    port: 3000,
+    // Default 3000; PORT lets tooling (e.g. preview harnesses) pick a free
+    // port when 3000 is already taken by another dev server.
+    port: Number(process.env.PORT) || 3000,
     https: httpsConfig,
     warmup: {
       clientFiles: [
