@@ -2264,6 +2264,10 @@ model KioskConfig {
   membershipBlurb     String?
   membershipSignupUrl String?
 
+  /// Admin-authored news/announcement lines shown in the kiosk's top banner,
+  /// one message per line (newline-separated). The kiosk rotates through them.
+  newsMessages String?
+
   updatedById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

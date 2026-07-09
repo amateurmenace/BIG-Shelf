@@ -49,12 +49,19 @@ additions on top of upstream's changes.
   The wall also shows **admin-managed content** via the Settings → Kiosk CMS
   (`settings.kiosk.tsx`, gated `generalSettings`, TEAM-only): up to three
   class/event promo cards (uploaded image + sign-up QR; `KioskPromo` table),
-  a welcoming "become a member" banner (copy + QR target; `KioskConfig` table —
-  hidden until a sign-up URL is set), and a rolling 30-day closed-days
-  calendar derived from the org's Working Hours (weekly schedule + overrides —
-  one source of truth with booking validation). Layout: promos top strip,
-  schedule board middle, membership banner bottom, BIG Shelf logo on a white
-  chip in the masthead. Additive: `app/modules/big-kiosk-content/`
+  a welcoming "become a member" card (copy + QR target; `KioskConfig` table —
+  hidden until a sign-up URL is set), a rotating **news banner** (admin-authored
+  lines in `KioskConfig.newsMessages`, newline-separated), and a rolling 30-day
+  closed-days calendar derived from the org's Working Hours (weekly schedule +
+  overrides — one source of truth with booking validation). CMS forms save
+  independently via a patch-based `upsertKioskConfig`; client-needed
+  constants/schemas live in `big-kiosk-content/shared.ts`. Layout: the kiosk is
+  a four-quadrant no-scroll board — room-schedule timeline (top-left) over the
+  book-equipment / become-member / equipment-out cards (bottom-left), and the
+  tappable "Next 7 days" day-picker (top-right, drives which day the timeline
+  shows so people can book ahead) over the closed-days calendar (bottom-right);
+  news banner + promo strip across the top; BIG Shelf logo on a white chip in
+  the masthead. Additive: `app/modules/big-kiosk-content/`
   (`service.server.ts` + client-safe `shared.ts` — route components must
   import constants/schemas from `shared`, never from the `.server` file, or
   vite rejects the client bundle). Core edit: the settings tab list.

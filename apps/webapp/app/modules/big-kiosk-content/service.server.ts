@@ -39,13 +39,13 @@ import {
 } from "~/utils/constants";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { parseFileFormData } from "~/utils/storage.server";
-import { MAX_KIOSK_PROMOS } from "./shared";
+import { MAX_KIOSK_PROMOS, splitKioskNews } from "./shared";
 import type { KioskClosedDays } from "./shared";
 
 const label = "Kiosk" as const;
 
 // Client-safe pieces live in ./shared; re-exported for server-side callers.
-export { MAX_KIOSK_PROMOS };
+export { MAX_KIOSK_PROMOS, splitKioskNews };
 export type { KioskClosedDays };
 
 /** Validates the promo form fields (parsed alongside the uploaded image). */
@@ -250,39 +250,50 @@ export async function getKioskConfig({
   }
 }
 
+/** The kiosk-config fields the CMS can patch (membership card + news). */
+type KioskConfigPatch = Partial<
+  Pick<
+    KioskConfig,
+    | "membershipHeadline"
+    | "membershipBlurb"
+    | "membershipSignupUrl"
+    | "newsMessages"
+  >
+>;
+
 /**
- * Creates or updates the org's kiosk config. Clearing the sign-up URL hides
- * the membership card on the wallboard (the QR needs a target to render).
+ * Creates or updates the org's kiosk config with a partial patch, so the CMS's
+ * separate membership-card and news forms each write only their own fields
+ * without clobbering the other. Clearing the sign-up URL hides the membership
+ * card on the wallboard (the QR needs a target to render); clearing news hides
+ * the banner.
+ *
+ * @param args.patch - Only the fields to change; omitted fields are untouched
  */
 export async function upsertKioskConfig({
   organizationId,
   updatedById,
-  membershipHeadline,
-  membershipBlurb,
-  membershipSignupUrl,
+  patch,
 }: {
   organizationId: Organization["id"];
   updatedById: User["id"];
-  membershipHeadline: string | null;
-  membershipBlurb: string | null;
-  membershipSignupUrl: string | null;
+  patch: KioskConfigPatch;
 }): Promise<KioskConfig> {
   try {
-    return await db.kioskConfig.upsert({
+    const existing = await db.kioskConfig.findUnique({
       where: { organizationId },
-      create: {
-        organizationId,
-        membershipHeadline,
-        membershipBlurb,
-        membershipSignupUrl,
-        updatedById,
-      },
-      update: {
-        membershipHeadline,
-        membershipBlurb,
-        membershipSignupUrl,
-        updatedById,
-      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return await db.kioskConfig.update({
+        where: { organizationId },
+        data: { ...patch, updatedById },
+      });
+    }
+
+    return await db.kioskConfig.create({
+      data: { organizationId, ...patch, updatedById },
     });
   } catch (cause) {
     throw new ShelfError({

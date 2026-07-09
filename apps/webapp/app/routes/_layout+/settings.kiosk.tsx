@@ -2,13 +2,15 @@
  * Kiosk display (admin CMS) — `/settings/kiosk`
  *
  * BIG-only. The content-management page for the public `/kiosk` wallboard:
+ * - **News & announcements** — short lines shown in the wallboard's top
+ *   banner, one message per line; the kiosk rotates through them.
  * - **Class & event promos** — up to three cards (image + title + date +
  *   sign-up link). The wallboard renders each with a QR code so visitors sign
  *   up on their phone.
  * - **Membership sign-up card** — the welcoming "become a member" panel:
  *   headline, blurb, and the sign-up URL its QR code points at. The card
  *   shows on the wall only once a URL is set.
- * - **Closed days** — read-only preview. The kiosk's month calendar derives
+ * - **Closed days** — read-only preview. The kiosk's 30-day calendar derives
  *   closures from the org's Working Hours (weekly schedule + date
  *   overrides), managed under Settings → Bookings, so booking validation and
  *   the wallboard always agree.
@@ -43,6 +45,8 @@ import {
 // client bundle and the route would fail to load).
 import {
   KioskMembershipSchema,
+  KioskNewsSchema,
+  MAX_KIOSK_NEWS,
   MAX_KIOSK_PROMOS,
 } from "~/modules/big-kiosk-content/shared";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -125,10 +129,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 /**
- * Handles the three CMS mutations. The add-promo form is multipart (it
- * carries the image), so the action branches on content type BEFORE reading
- * the body: multipart → create promo; urlencoded → `delete-promo` /
- * `save-membership` intents.
+ * Handles the CMS mutations. The add-promo form is multipart (it carries the
+ * image), so the action branches on content type BEFORE reading the body:
+ * multipart → create promo; urlencoded → `delete-promo` / `save-membership` /
+ * `save-news` intents.
  */
 export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = context.getSession();
@@ -163,7 +167,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await request.formData();
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["delete-promo", "save-membership"]) }),
+      z.object({
+        intent: z.enum(["delete-promo", "save-membership", "save-news"]),
+      }),
       { additionalData: { userId, organizationId } }
     );
 
@@ -193,7 +199,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         await upsertKioskConfig({
           organizationId,
           updatedById: userId,
-          ...parsed,
+          patch: parsed,
         });
 
         sendNotification({
@@ -201,6 +207,28 @@ export async function action({ context, request }: ActionFunctionArgs) {
           message: parsed.membershipSignupUrl
             ? "The kiosk now invites visitors to join."
             : "The card is hidden until you set a sign-up link.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+        return payload({ ok: true });
+      }
+
+      case "save-news": {
+        const parsed = parseData(formData, KioskNewsSchema, {
+          additionalData: { userId, organizationId },
+          shouldBeCaptured: false,
+        });
+        await upsertKioskConfig({
+          organizationId,
+          updatedById: userId,
+          patch: parsed,
+        });
+
+        sendNotification({
+          title: "News updated",
+          message: parsed.newsMessages
+            ? "The kiosk banner will refresh within a minute."
+            : "The news banner is now hidden.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
@@ -266,6 +294,39 @@ export default function KioskSettingsPage() {
           <p>{topLevelError.message}</p>
         </div>
       ) : null}
+
+      {/* News & announcements */}
+      <div className="rounded border border-gray-200 bg-white">
+        <div className="border-b border-gray-100 px-4 py-3 md:px-6">
+          <h3 className="text-sm font-semibold text-gray-900">
+            News &amp; announcements
+          </h3>
+          <p className="text-xs text-gray-500">
+            Short updates shown in the banner at the top of the wallboard — one
+            message per line (up to {MAX_KIOSK_NEWS}). The kiosk rotates through
+            them. Leave empty to hide the banner.
+          </p>
+        </div>
+        <Form method="post" className="flex flex-col gap-3 p-4 md:p-6">
+          <input type="hidden" name="intent" value="save-news" />
+          <Input
+            label="News messages"
+            hideLabel
+            inputType="textarea"
+            rows={4}
+            name="newsMessages"
+            defaultValue={config?.newsMessages ?? ""}
+            placeholder={
+              "Summer hours start June 15 — open until 9pm!\nNew lighting kits just added to the catalog.\nMember mixer this Friday at 6pm — all welcome."
+            }
+          />
+          <div>
+            <Button type="submit" disabled={disabled}>
+              {disabled ? "Saving…" : "Save news"}
+            </Button>
+          </div>
+        </Form>
+      </div>
 
       {/* Promos */}
       <div className="rounded border border-gray-200 bg-white">

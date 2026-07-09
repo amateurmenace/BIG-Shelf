@@ -1,26 +1,29 @@
 /**
  * Kiosk Wallboard — `/kiosk`
  *
- * A full-screen, dark, 16:9 touch display for the space: today's room
- * schedule as a tappable timeline, the week at a glance, today's equipment
- * movement, and a QR code to book from a phone. Designed to run on a wall
- * TV / touchscreen that stays signed in under a STAFF kiosk account.
+ * A full-screen, dark, 16:9 touch display for the space, laid out as four
+ * quadrants that fit one screen without scrolling: the room-schedule timeline
+ * (top-left) over the booking cards (bottom-left), and the 7-day picker
+ * (top-right) over the closed-days calendar (bottom-right). Designed to run on
+ * a wall TV / touchscreen that stays signed in under a STAFF kiosk account.
  *
  * - Lives OUTSIDE `_layout+` so no sidebar/app chrome renders (same pattern
  *   as the `qr+` full-screen routes). Auth is enforced in the loader.
  * - Anonymized: busy blocks say "Reserved" — the payload carries no booking
  *   or member names (counts only), so a public wall leaks nothing.
+ * - Day picker: the "Next 7 days" strip drives which day the timeline shows,
+ *   so people can book future days from the wall (not just today).
  * - Walk-up booking: tap any free hour → pick a duration → type your
  *   membership email. The action resolves the email to an org member and
  *   books THEM as custodian (the kiosk account is only the creator), reusing
  *   {@link createRoomReservation} — so double-booking is rejected and the
  *   member gets the confirmation email.
  * - Self-refreshing: revalidates every minute; a live clock + "now" line.
- * - Admin-managed content (Settings → Kiosk CMS): up to three class/event
- *   promo cards with sign-up QR codes shown along the TOP of the board, the
- *   welcoming "become a member" banner along the bottom, and a rolling
- *   30-day calendar marking the days BIG is closed (derived from the org's
- *   Working Hours so it always matches booking rules).
+ * - Admin-managed content (Settings → Kiosk CMS): a rotating news banner at
+ *   the top, up to three class/event promo cards with sign-up QR codes, a
+ *   "book equipment" card (with an enlargeable QR), a welcoming "become a
+ *   member" card, and a rolling 30-day calendar marking the days BIG is
+ *   closed (derived from the org's Working Hours so it matches booking rules).
  *
  * @see {@link file://./_layout+/week-ahead.tsx} — the printable staff twin
  * @see {@link file://./_layout+/settings.kiosk.tsx} — the CMS for the wall content
@@ -28,6 +31,7 @@
  * @see {@link file://./../modules/big-kiosk-content/service.server.ts}
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MegaphoneIcon } from "lucide-react";
 import { DateTime } from "luxon";
 import QRCode from "qrcode-generator";
 import type {
@@ -52,6 +56,7 @@ import {
   getKioskClosedDays,
   getKioskConfig,
   getKioskPromos,
+  splitKioskNews,
 } from "~/modules/big-kiosk-content/service.server";
 import type { KioskClosedDays } from "~/modules/big-kiosk-content/shared";
 import {
@@ -146,6 +151,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               signupUrl: config.membershipSignupUrl,
             }
           : null,
+        // Admin-authored news lines for the top banner (empty = hidden).
+        newsMessages: splitKioskNews(config?.newsMessages),
         closedDays,
       })
     );
@@ -343,14 +350,22 @@ function KioskBoard() {
     weekCounts,
     promos,
     membership,
+    newsMessages,
     closedDays,
   } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const [now, setNow] = useState(() => DateTime.now());
+  // Which day the timeline board shows. Defaults to today; the "Next 7 days"
+  // picker changes it so people can book future days from the wall.
+  const [selectedDay, setSelectedDay] = useState(() =>
+    DateTime.now().startOf("day")
+  );
   const [sheet, setSheet] = useState<{
     room: ClientRoomSchedule;
     slotStart: DateTime;
   } | null>(null);
+
+  const isTodaySelected = selectedDay.hasSame(now, "day");
 
   // Live clock (1s) + data refresh (60s, skipped while a booking is open so
   // a revalidation never yanks the sheet's room object out from under it).
@@ -386,11 +401,14 @@ function KioskBoard() {
     void revalidator.revalidate();
   }, [revalidator]);
 
+  // Bottom row holds Book-equipment + (optional) Membership + Equipment-today.
+  const bottomCardCount = 2 + (membership ? 1 : 0);
+
   return (
     <>
       {/* Masthead — the BIG Shelf logo leads; it sits on a white chip so the
           navy/magenta wordmark stays legible on the dark board. */}
-      <header className="flex items-center justify-between px-8 pb-4 pt-6">
+      <header className="flex shrink-0 items-center justify-between px-8 pb-3 pt-5">
         <div className="flex items-center gap-5">
           <span className="rounded-2xl bg-white px-5 py-3 shadow-lg">
             <img
@@ -400,16 +418,16 @@ function KioskBoard() {
             />
           </span>
           <div>
-            <h1 className="text-2xl font-semibold">Today&apos;s rooms</h1>
+            <h1 className="text-2xl font-semibold">{organizationName}</h1>
             <p className="text-sm text-gray-400">
-              Live schedule · walk-ups welcome
+              Reserve a room or borrow equipment · walk-ups welcome
             </p>
           </div>
         </div>
         <div className="text-right">
-          <p className="text-6xl font-semibold tabular-nums leading-none">
+          <p className="text-5xl font-semibold tabular-nums leading-none">
             {now.toFormat("h:mm")}
-            <span className="ml-2 text-2xl font-normal text-gray-400">
+            <span className="ml-2 text-xl font-normal text-gray-400">
               {now.toFormat("a")}
             </span>
           </p>
@@ -419,10 +437,13 @@ function KioskBoard() {
         </div>
       </header>
 
+      {/* News banner — admin-authored updates, rotating (top section) */}
+      <NewsBanner messages={newsMessages} />
+
       {/* Promo strip — up to three classes/events, top billing */}
       {promos.length > 0 ? (
         <div
-          className="grid shrink-0 gap-4 px-8 pb-4"
+          className="grid shrink-0 gap-4 px-8 pb-3"
           style={{
             gridTemplateColumns: `repeat(${promos.length}, minmax(0, 1fr))`,
           }}
@@ -433,62 +454,86 @@ function KioskBoard() {
         </div>
       ) : null}
 
-      {/* Body */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 px-8 pb-6 lg:grid-cols-[minmax(0,3fr),minmax(260px,1fr)]">
-        {/* Timeline board */}
-        <div className="flex min-h-0 flex-col rounded-2xl bg-gray-800/60 p-5">
-          <HourAxis />
-          {rooms.length === 0 ? (
-            <p className="mt-6 text-gray-400">No rooms configured yet.</p>
-          ) : (
-            <div className="mt-2 flex min-h-0 flex-1 flex-col justify-evenly gap-3 overflow-y-auto">
-              {rooms.map((room) => (
-                <RoomTimelineRow
-                  key={room.id}
-                  room={room}
-                  now={now}
-                  onSlotTap={openSheet}
-                />
-              ))}
-            </div>
-          )}
-          <p className="mt-3 text-center text-sm text-gray-500">
-            Tap any open slot to reserve it on the spot
-          </p>
-        </div>
-
-        {/* Rail */}
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
-          <WeekAtAGlance weekCounts={weekCounts} now={now} />
-
-          <ClosedDatesCalendar closedDays={closedDays} now={now} />
-
-          <div className="rounded-2xl bg-gray-800/60 p-5">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
-              Equipment today
-            </h2>
-            <div className="mt-3 flex gap-6">
+      {/* Body — four quadrants:
+          left column  = room schedule (top) over the booking cards (bottom),
+          right column = day picker (top) over the closed-days calendar
+          (bottom-right). Everything fits one 16:9 screen without scrolling. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 px-8 pb-6 lg:grid-cols-[minmax(0,3fr),minmax(280px,1fr)]">
+        {/* Left column */}
+        <div className="flex min-h-0 flex-col gap-4">
+          {/* Timeline board */}
+          <div className="flex min-h-0 flex-1 flex-col rounded-2xl bg-gray-800/60 p-5">
+            <div className="mb-2 flex items-center justify-between">
               <div>
-                <p className="text-3xl font-semibold tabular-nums">
-                  {todayCounts.departures}
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
+                  Room schedule
+                </h2>
+                <p className="text-xs text-gray-500">
+                  {isTodaySelected
+                    ? "Today"
+                    : selectedDay.toFormat("EEEE, MMMM d")}{" "}
+                  · tap a slot to reserve
                 </p>
-                <p className="text-xs text-gray-400">going out</p>
               </div>
-              <div>
-                <p className="text-3xl font-semibold tabular-nums">
-                  {todayCounts.returns}
-                </p>
-                <p className="text-xs text-gray-400">due back</p>
-              </div>
+              {!isTodaySelected ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDay(now.startOf("day"))}
+                  className="rounded-lg bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20"
+                >
+                  Back to today
+                </button>
+              ) : null}
             </div>
+            <HourAxis />
+            {rooms.length === 0 ? (
+              <p className="mt-6 text-gray-400">No rooms configured yet.</p>
+            ) : (
+              <div className="mt-2 flex min-h-0 flex-1 flex-col justify-evenly gap-2">
+                {rooms.map((room) => (
+                  <RoomTimelineRow
+                    key={room.id}
+                    room={room}
+                    selectedDay={selectedDay}
+                    now={now}
+                    onSlotTap={openSheet}
+                  />
+                ))}
+              </div>
+            )}
+            <p className="mt-2 text-center text-sm text-gray-500">
+              Tap any open slot to reserve it on the spot
+            </p>
           </div>
 
-          <PhoneQR />
+          {/* Bottom cards — the width of the room-schedule section above */}
+          <div
+            className="grid shrink-0 gap-4"
+            style={{
+              gridTemplateColumns: `repeat(${bottomCardCount}, minmax(0, 1fr))`,
+            }}
+          >
+            <BookEquipmentCard />
+            {membership ? <MembershipCard membership={membership} /> : null}
+            <EquipmentTodayCard todayCounts={todayCounts} />
+          </div>
+        </div>
+
+        {/* Right column — day picker (top) + closed-days calendar (bottom) */}
+        <div className="flex min-h-0 flex-col gap-4">
+          <WeekAtAGlance
+            weekCounts={weekCounts}
+            selectedDay={selectedDay}
+            now={now}
+            onSelectDay={setSelectedDay}
+          />
+          <ClosedDatesCalendar
+            closedDays={closedDays}
+            now={now}
+            className="min-h-0 flex-1"
+          />
         </div>
       </div>
-
-      {/* Membership invite — full-width welcome banner along the bottom */}
-      {membership ? <MembershipCard membership={membership} /> : null}
 
       {sheet ? (
         <WalkUpBookingSheet
@@ -526,20 +571,24 @@ function HourAxis() {
 }
 
 /**
- * One room's row: name + live status on the left, the tappable day track on
- * the right (busy blocks, free hour cells, "now" line).
+ * One room's row: name + status on the left, the tappable day track on the
+ * right (busy blocks, free hour cells, "now" line). Renders whichever day the
+ * board has selected; past-shading and the "now" line only apply to today.
  */
 function RoomTimelineRow({
   room,
+  selectedDay,
   now,
   onSlotTap,
 }: {
   room: ClientRoomSchedule;
+  selectedDay: DateTime;
   now: DateTime;
   onSlotTap: (room: ClientRoomSchedule, slotStart: DateTime) => void;
 }) {
-  const dayStart = now.startOf("day").plus({ hours: BOARD_START_HOUR });
-  const dayEnd = now.startOf("day").plus({ hours: BOARD_END_HOUR });
+  const dayStart = selectedDay.startOf("day").plus({ hours: BOARD_START_HOUR });
+  const dayEnd = selectedDay.startOf("day").plus({ hours: BOARD_END_HOUR });
+  const isToday = selectedDay.hasSame(now, "day");
 
   /** Busy blocks clamped to the visible window, as % offsets. */
   const blocks = room.busyWindows.flatMap((window) => {
@@ -555,22 +604,49 @@ function RoomTimelineRow({
     return [{ key: window.bookingId, left, width }];
   });
 
-  /** The tappable hour grid: a cell is offered only when fully free + future. */
+  /** The tappable hour grid: a cell is offered when free (and, today, future). */
   const cells = Array.from({ length: BOARD_HOURS }, (_, index) => {
     const cellStart = dayStart.plus({ hours: index });
     const cellEnd = cellStart.plus({ hours: 1 });
-    const isPast = cellEnd <= now;
+    const isPast = isToday && cellEnd <= now;
     const isFree =
       !isPast && !overlapsAnyWindow(room.busyWindows, cellStart, cellEnd);
     return { cellStart, isFree, isPast };
   });
 
+  // How many reservations fall on the selected day (drives the future-day
+  // status text; today keeps the live availability).
+  const dayReservationCount = room.busyWindows.filter((window) => {
+    const from = toDT(window.from);
+    const to = toDT(window.to);
+    return from < dayEnd && to > dayStart;
+  }).length;
+
   const isBusyNow = room.availability.state === "busy";
-  const nowOffset = now.diff(dayStart, "hours").hours / BOARD_HOURS;
+  const statusIsBusy = isToday ? isBusyNow : dayReservationCount > 0;
+  const statusText = isToday
+    ? isBusyNow
+      ? `In use until ${
+          room.availability.until
+            ? toDT(room.availability.until).toFormat("h:mm a")
+            : "later"
+        }`
+      : room.availability.until
+      ? `Free until ${toDT(room.availability.until).toFormat("h:mm a")}`
+      : "Free"
+    : dayReservationCount > 0
+    ? `${dayReservationCount} reservation${
+        dayReservationCount === 1 ? "" : "s"
+      }`
+    : "Open all day";
+
+  const nowOffset = isToday
+    ? now.diff(dayStart, "hours").hours / BOARD_HOURS
+    : -1;
 
   return (
     <div className="flex items-center gap-3">
-      {/* Identity + live status */}
+      {/* Identity + status */}
       <div className="w-40 shrink-0">
         <p className="flex items-center gap-2 truncate text-base font-semibold">
           <span
@@ -583,23 +659,15 @@ function RoomTimelineRow({
         <p
           className={tw(
             "mt-0.5 text-xs",
-            isBusyNow ? "text-amber-300" : "text-emerald-300"
+            statusIsBusy ? "text-amber-300" : "text-emerald-300"
           )}
         >
-          {isBusyNow
-            ? `In use until ${
-                room.availability.until
-                  ? toDT(room.availability.until).toFormat("h:mm a")
-                  : "later"
-              }`
-            : room.availability.until
-            ? `Free until ${toDT(room.availability.until).toFormat("h:mm a")}`
-            : "Free"}
+          {statusText}
         </p>
       </div>
 
       {/* Track */}
-      <div className="relative h-14 flex-1 overflow-hidden rounded-lg bg-gray-700/40">
+      <div className="relative h-12 flex-1 overflow-hidden rounded-lg bg-gray-700/40">
         {/* Free-slot tap targets */}
         <div
           className="absolute inset-0 grid"
@@ -666,29 +734,46 @@ function RoomTimelineRow({
   );
 }
 
-/** The 7-day mini agenda: room-reservation count per day. */
+/**
+ * The 7-day picker: room-reservation count per day, and each day is tappable
+ * to drive which day the timeline board shows (so people can book ahead).
+ */
 function WeekAtAGlance({
   weekCounts,
+  selectedDay,
   now,
+  onSelectDay,
 }: {
   weekCounts: { date: string | Date; roomBookings: number }[];
+  selectedDay: DateTime;
   now: DateTime;
+  onSelectDay: (day: DateTime) => void;
 }) {
   return (
-    <div className="rounded-2xl bg-gray-800/60 p-5">
+    <div className="shrink-0 rounded-2xl bg-gray-800/60 p-5">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
         Next 7 days
       </h2>
+      <p className="mt-0.5 text-xs text-gray-500">
+        Tap a day to view &amp; book it
+      </p>
       <div className="mt-3 flex justify-between gap-1">
         {weekCounts.map((day) => {
           const date = toDT(day.date);
           const isToday = date.hasSame(now, "day");
+          const isSelected = date.hasSame(selectedDay, "day");
           return (
-            <div
+            <button
               key={date.toISODate()}
+              type="button"
+              onClick={() => onSelectDay(date.startOf("day"))}
+              aria-pressed={isSelected}
+              aria-label={`Show ${date.toFormat("cccc, MMMM d")}`}
               className={tw(
-                "flex w-10 flex-col items-center rounded-lg py-2",
-                isToday ? "bg-white/10" : ""
+                "flex w-10 flex-col items-center rounded-lg py-2 transition",
+                isSelected
+                  ? "bg-white/20 ring-1 ring-white/50"
+                  : "hover:bg-white/10"
               )}
             >
               <span className="text-xs uppercase text-gray-500">
@@ -697,7 +782,9 @@ function WeekAtAGlance({
               <span
                 className={tw(
                   "text-sm",
-                  isToday ? "font-semibold text-white" : "text-gray-300"
+                  isSelected || isToday
+                    ? "font-semibold text-white"
+                    : "text-gray-300"
                 )}
               >
                 {date.day}
@@ -710,7 +797,7 @@ function WeekAtAGlance({
               >
                 {day.roomBookings > 0 ? day.roomBookings : "·"}
               </span>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -741,21 +828,167 @@ function QRImage({
   return <img src={dataUrl} alt={alt} className={className} />;
 }
 
-/** "Book from your phone" QR — encodes this deployment's /reserve URL. */
-function PhoneQR() {
+/** A full-screen QR overlay for easy scanning from across the room. */
+function QRModal({
+  url,
+  title,
+  subtitle,
+  onClose,
+}: {
+  url: string;
+  title: string;
+  subtitle: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
-    <div className="flex items-center gap-4 rounded-2xl bg-gray-800/60 p-5">
-      <QRImage
-        value={`${window.location.origin}/reserve`}
-        alt="QR code linking to the member reservation portal"
-        className="size-24 rounded-lg bg-white p-1.5"
-      />
-      <div>
-        <h2 className="text-sm font-semibold">Book from your phone</h2>
-        <p className="mt-1 text-xs text-gray-400">
-          Scan to browse equipment and rooms, and manage your reservations.
-        </p>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="flex flex-col items-center rounded-2xl bg-white p-8 text-center shadow-2xl"
+      >
+        <QRImage value={url} alt={`QR code for ${title}`} className="size-72" />
+        <p className="mt-4 text-2xl font-semibold text-gray-900">{title}</p>
+        <p className="mt-1 text-base text-gray-500">{subtitle}</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-6 h-12 rounded-lg bg-gray-900 px-8 text-base font-medium text-white hover:bg-gray-800"
+        >
+          Done
+        </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * "Book equipment" card — a QR to the member portal plus a button that blows
+ * the code up full-screen for easy scanning from across the lobby.
+ */
+function BookEquipmentCard() {
+  const [enlarged, setEnlarged] = useState(false);
+  const url = `${window.location.origin}/reserve`;
+
+  return (
+    <>
+      <div className="flex h-full items-center gap-4 rounded-2xl bg-gray-800/60 p-5">
+        <QRImage
+          value={url}
+          alt="QR code linking to the member reservation portal"
+          className="size-24 shrink-0 rounded-lg bg-white p-1.5"
+        />
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold">Book equipment</h2>
+          <p className="mt-1 text-xs text-gray-400">
+            Reserve cameras, audio, lighting &amp; more — scan with your phone.
+          </p>
+          <button
+            type="button"
+            onClick={() => setEnlarged(true)}
+            className="mt-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-medium hover:bg-white/20"
+          >
+            Show a bigger code
+          </button>
+        </div>
+      </div>
+      {enlarged ? (
+        <QRModal
+          url={url}
+          title="Book equipment"
+          subtitle="Scan with your phone camera to browse and reserve gear"
+          onClose={() => setEnlarged(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** "Equipment out today" card — going-out / due-back counts. */
+function EquipmentTodayCard({
+  todayCounts,
+}: {
+  todayCounts: { departures: number; returns: number };
+}) {
+  return (
+    <div className="flex h-full flex-col rounded-2xl bg-gray-800/60 p-5">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
+        Equipment out today
+      </h2>
+      <div className="mt-auto flex gap-8 pt-3">
+        <div>
+          <p className="text-4xl font-semibold tabular-nums">
+            {todayCounts.departures}
+          </p>
+          <p className="text-xs text-gray-400">going out</p>
+        </div>
+        <div>
+          <p className="text-4xl font-semibold tabular-nums">
+            {todayCounts.returns}
+          </p>
+          <p className="text-xs text-gray-400">due back</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The top news banner — admin-authored announcement lines that rotate every
+ * few seconds. Renders nothing when there are no messages.
+ */
+function NewsBanner({ messages }: { messages: string[] }) {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (messages.length <= 1) return;
+    const timer = setInterval(
+      () => setIndex((current) => (current + 1) % messages.length),
+      7000
+    );
+    return () => clearInterval(timer);
+  }, [messages.length]);
+
+  if (messages.length === 0) return null;
+  const active = index % messages.length;
+
+  return (
+    <div className="mx-8 mb-3 flex shrink-0 items-center gap-3 rounded-2xl border border-primary-400/40 bg-primary-500/15 px-5 py-2.5">
+      <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary-500 px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-white">
+        <MegaphoneIcon className="size-3.5" aria-hidden />
+        News
+      </span>
+      <p className="min-w-0 flex-1 truncate text-lg font-medium text-white">
+        {messages[active]}
+      </p>
+      {messages.length > 1 ? (
+        <div className="flex shrink-0 gap-1.5" aria-hidden>
+          {messages.map((message, dot) => (
+            <span
+              key={message}
+              className={tw(
+                "size-1.5 rounded-full",
+                dot === active ? "bg-white" : "bg-white/30"
+              )}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -777,7 +1010,7 @@ function PromoCard({
   };
 }) {
   return (
-    <div className="relative h-40 overflow-hidden rounded-2xl bg-gray-800">
+    <div className="relative h-32 overflow-hidden rounded-2xl bg-gray-800">
       <img
         src={promo.imageUrl}
         alt=""
@@ -792,11 +1025,11 @@ function PromoCard({
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-300">
             Happening at BIG
           </p>
-          <p className="mt-1 line-clamp-2 text-xl font-semibold leading-tight">
+          <p className="mt-0.5 line-clamp-2 text-lg font-semibold leading-tight">
             {promo.title}
           </p>
           {promo.eventDate ? (
-            <p className="mt-1 text-sm text-gray-200">
+            <p className="mt-0.5 text-sm text-gray-200">
               {/* Stored as UTC midnight of the picked date — format in UTC so
                   the calendar date never shifts across timezones. */}
               {toDT(promo.eventDate).toUTC().toFormat("EEEE, MMMM d")}
@@ -807,7 +1040,7 @@ function PromoCard({
           <QRImage
             value={promo.linkUrl}
             alt={`QR code to sign up for ${promo.title}`}
-            className="size-20 rounded-lg bg-white p-1"
+            className="size-16 rounded-lg bg-white p-1"
           />
           <span className="text-xs font-medium text-gray-200">
             Scan to sign up
@@ -832,30 +1065,26 @@ function MembershipCard({
   };
 }) {
   return (
-    <div className="mx-8 mb-6 flex shrink-0 items-center justify-between gap-6 rounded-2xl bg-gradient-to-r from-primary-600 via-primary-500 to-primary-400 px-6 py-4">
+    <div className="flex h-full items-center justify-between gap-4 rounded-2xl bg-gradient-to-br from-primary-600 via-primary-500 to-primary-400 p-5">
       <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-widest text-white/80">
           New here? Welcome!
         </p>
-        <p className="mt-0.5 text-xl font-semibold leading-tight">
+        <p className="mt-0.5 text-lg font-semibold leading-tight">
           {membership.headline ?? "Become a BIG member"}
         </p>
         <p className="mt-0.5 line-clamp-2 text-sm text-white/90">
           {membership.blurb ??
-            "Everyone's welcome at BIG! Members borrow cameras and gear, book our studios, and join classes and workshops — come create with us."}
+            "Everyone's welcome at BIG! Members borrow gear, book studios, and join classes — come create with us."}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="flex shrink-0 flex-col items-center gap-1">
         <QRImage
           value={membership.signupUrl}
           alt="QR code to sign up for a membership"
           className="size-20 rounded-lg bg-white p-1"
         />
-        <span className="text-xs font-medium text-white/90">
-          Scan
-          <br />
-          to join
-        </span>
+        <span className="text-xs font-medium text-white/90">Scan to join</span>
       </div>
     </div>
   );
@@ -871,9 +1100,11 @@ function MembershipCard({
 function ClosedDatesCalendar({
   closedDays,
   now,
+  className,
 }: {
   closedDays: KioskClosedDays;
   now: DateTime;
+  className?: string;
 }) {
   if (!closedDays.enabled) return null;
 
@@ -935,7 +1166,7 @@ function ClosedDatesCalendar({
   const upcomingClosures = closureRanges.slice(0, 2);
 
   return (
-    <div className="rounded-2xl bg-gray-800/60 p-5">
+    <div className={tw("rounded-2xl bg-gray-800/60 p-5", className)}>
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
           Closed days

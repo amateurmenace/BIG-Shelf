@@ -13,6 +13,49 @@ import { z } from "zod";
 /** The wallboard shows at most this many promo cards. */
 export const MAX_KIOSK_PROMOS = 3;
 
+/** The kiosk rotates through at most this many news lines. */
+export const MAX_KIOSK_NEWS = 5;
+
+/** Max characters per news line (keeps the banner readable on the wall). */
+const MAX_NEWS_LINE_LENGTH = 200;
+
+/**
+ * Normalizes a raw multiline news textarea into stored form: one message per
+ * line, trimmed, blanks dropped, capped at {@link MAX_KIOSK_NEWS} lines each
+ * ≤ {@link MAX_NEWS_LINE_LENGTH} chars. Returns null when nothing survives
+ * (which hides the banner).
+ */
+export function normalizeKioskNews(
+  raw: string | null | undefined
+): string | null {
+  if (!raw) return null;
+  const lines = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, MAX_KIOSK_NEWS)
+    .map((line) => line.slice(0, MAX_NEWS_LINE_LENGTH));
+  return lines.length ? lines.join("\n") : null;
+}
+
+/** Splits stored news back into an array of message lines for rendering. */
+export function splitKioskNews(stored: string | null | undefined): string[] {
+  if (!stored) return [];
+  return stored
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/** Validates the news/announcements CMS form (one message per line). */
+export const KioskNewsSchema = z.object({
+  newsMessages: z
+    .string()
+    .max(2000, "That's a lot of news — keep it under 2000 characters")
+    .optional()
+    .transform((value) => normalizeKioskNews(value)),
+});
+
 /** Validates the membership-card CMS form. */
 export const KioskMembershipSchema = z.object({
   membershipHeadline: z
