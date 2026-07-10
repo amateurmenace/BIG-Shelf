@@ -258,9 +258,15 @@ const QRScanner = () => {
         triggerSuccess();
         void navigate(`/qr/${value}`);
       } else if (
-        ["Assign custody", "Release custody", "Update location"].includes(
-          currentAction
-        )
+        [
+          "Assign custody",
+          "Release custody",
+          "Update location",
+          // BIG: front-desk quick actions collect items the same bulk way.
+          "Check out equipment",
+          "Check in equipment",
+          "Make a reservation",
+        ].includes(currentAction)
       ) {
         if (error) {
           triggerError();

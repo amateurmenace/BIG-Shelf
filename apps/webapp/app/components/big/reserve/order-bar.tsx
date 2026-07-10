@@ -23,7 +23,12 @@ function OrderBarInner() {
   const order = useAtomValue(equipmentOrderAtom);
   const location = useLocation();
 
-  if (order.length === 0 || location.pathname === "/reserve/order") {
+  // Hidden on checkout (its own submit) and on the scanner (its own sticky
+  // footer CTA — the floating bar would cover the scan log).
+  if (
+    order.length === 0 ||
+    ["/reserve/order", "/reserve/scan"].includes(location.pathname)
+  ) {
     return null;
   }
 

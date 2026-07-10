@@ -19,6 +19,9 @@ export function useNprogress() {
     "archive-audit",
     "cancel-audit",
     "sidebar-toggler",
+    // BIG: member scan-to-order lookups fire on every camera detection — the
+    // scan page has its own inline feedback, so no global bar flashing.
+    "big-scan-resolve",
   ];
   // Filter out fetchers that have a key from the excludeFetchers array
   const filteredFetchers = fetchers.filter(

@@ -39,30 +39,44 @@ additions on top of upstream's changes.
   (members get a focused Home / Reserve equipment / Book a room / My
   reservations nav).
 - **Member scan-to-reserve + equipment info pages + PWA** — the mobile-first
-  "walk the shelves" flow: `/reserve/scan` (reuses the shared `CodeScanner`;
-  QR / barcode / SAM-ID resolved org-scoped by `resolveScannedCode` — foreign
-  labels are never resolvable), landing on `/reserve/equipment/:assetId`
-  (anonymized info page: large photo, availability, description, and
-  admin-managed **guides** — manual/doc links plus YouTube/Vimeo video
-  explainers embedded via the allowlist-only `videoEmbedUrl`; everything else
-  renders as a plain link, never an iframe). Members build a multi-item
-  **order** (localStorage Jotai cart + floating `OrderBar` in the portal
-  layout) and check out at `/reserve/order`, which re-validates every id
-  server-side and composes upstream `createBooking`→`reserveBooking` via
-  `createEquipmentReservation` (Neon gate, conflicts, emails, loan agreement
-  all fire). NOTE: the checkout's hidden cart field is `orderAssetIds` — the
-  shared `BookingFormSchema` owns the `assetIds` name (array) and a JSON
-  string under that name fails its validation. Guides are staff-managed on
-  the asset page's **Guides** tab (`assets.$assetId.guides.tsx`, additive
-  `AssetGuide` table). PWA: `static/manifest.json` + generated
-  `app-icon-*` images + `/reserve/app` add-to-home-screen instructions.
-  Additive: `app/modules/big-equipment/` (`service.server.ts` + client-safe
-  `shared.ts`), `app/atoms/big-equipment-order.ts`,
-  `app/components/big/reserve/{add-to-order-button,order-bar}.tsx`, the
-  `reserve.scan/equipment_.$assetId/order/app` routes. Core edits: the asset
-  page tab list + a MEMBER→info-page redirect in `assets.$assetId.tsx`
-  (members otherwise see the staff page with custody/location), catalog card
-  CTAs, the dashboard action grid, `root.tsx` apple-touch-icon.
+  "walk the shelves" flow: `/reserve/scan` is a CONTINUOUS multi-scan board
+  (reuses the shared `CodeScanner`; QR / barcode / SAM-ID resolved org-scoped
+  by `resolveScannedCode` — foreign labels are never resolvable): each scan
+  drops the item straight into the order with a feedback flash + haptic + a
+  running session list under the camera; the camera never pauses. Scans are
+  QUEUED client-side via an `inFlight` ref — several detections can fire in
+  one tick, and reading `fetcher.state` from the render closure would let a
+  new `fetcher.submit` CANCEL the in-flight one (drops scans); a same-code
+  cooldown stops one label from machine-gunning entries. Item details live on
+  `/reserve/equipment/:assetId` (anonymized info page: large photo,
+  availability, description, and admin-managed **guides** — manual/doc links
+  plus YouTube/Vimeo video explainers embedded via the allowlist-only
+  `videoEmbedUrl`; everything else renders as a plain link, never an iframe).
+  Checkout at `/reserve/order` re-validates every id server-side and composes
+  upstream `createBooking`→`reserveBooking` via `createEquipmentReservation`
+  (Neon gate, conflicts, emails, loan agreement all fire). NOTE: the
+  checkout's hidden cart field is `orderAssetIds` — the shared
+  `BookingFormSchema` owns the `assetIds` name (array) and a JSON string
+  under that name fails its validation. Guides are staff-managed on the
+  asset page's **Guides** tab (`assets.$assetId.guides.tsx`, additive
+  `AssetGuide` table). PWA: `static/manifest.json` + generated `app-icon-*`
+  images + `/reserve/app` add-to-home-screen instructions. **Staff scanner
+  quick actions** (`/scanner` ActionSwitcher): "Check out equipment" /
+  "Check in equipment" (drawers post to additive `api+/big-desk.ts`, which
+  groups scanned assets by their RESERVED/ONGOING booking and runs upstream
+  `partialCheckoutBooking`/`partialCheckinBooking` per booking, returning
+  per-asset failures; kits + kit-member assets are blocked) and "Make a
+  reservation" (opens `/bookings/new?assetId=…` with scanned assets
+  pre-selected). Additive: `app/modules/big-equipment/` (`service.server.ts`
+  - client-safe `shared.ts`), `app/atoms/big-equipment-order.ts`,
+    `app/components/big/reserve/{add-to-order-button,order-bar}.tsx`,
+    `app/components/scanner/drawer/uses/big-*.tsx`, the
+    `reserve.scan/equipment_.$assetId/order/app` + `api+/big-desk` routes.
+    Core edits: the asset page tab list + a MEMBER→info-page redirect in
+    `assets.$assetId.tsx` (members otherwise see the staff page with
+    custody/location), catalog card CTAs, the dashboard action grid,
+    `root.tsx` apple-touch-icon, the scanner's `ACTION_CONFIGS`/bulk branch,
+    `use-nprogress.ts` (`big-scan-resolve` exclusion).
 - **Room booking flow + week-ahead digest + kiosk wallboard** — a dedicated
   "book a room" pipeline (`app/modules/big-room-booking/`) that composes
   upstream `createBooking` → `updateBookingRooms` → `reserveBooking` (so the

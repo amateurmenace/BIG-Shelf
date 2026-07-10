@@ -22,6 +22,11 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import { scannerActionAtom } from "./action-atom";
 import AssignCustodyDrawer from "./uses/assign-custody-drawer";
+import BigCreateReservationDrawer from "./uses/big-create-reservation-drawer";
+import {
+  BigDeskCheckinDrawer,
+  BigDeskCheckoutDrawer,
+} from "./uses/big-desk-drawers";
 import ReleaseCustodyDrawer from "./uses/release-custody-drawer";
 import UpdateLocationDrawer from "./uses/update-location-drawer";
 
@@ -45,6 +50,22 @@ const ACTION_CONFIGS = [
     id: "Update location",
     permissionEntity: PermissionEntity.asset,
     permissionAction: PermissionAction.update,
+  },
+  // BIG: front-desk quick actions — scan gear, move its bookings.
+  {
+    id: "Check out equipment",
+    permissionEntity: PermissionEntity.booking,
+    permissionAction: PermissionAction.checkout,
+  },
+  {
+    id: "Check in equipment",
+    permissionEntity: PermissionEntity.booking,
+    permissionAction: PermissionAction.checkin,
+  },
+  {
+    id: "Make a reservation",
+    permissionEntity: PermissionEntity.booking,
+    permissionAction: PermissionAction.create,
   },
 ] as const;
 
@@ -141,6 +162,16 @@ export function ActionSwitcher() {
       <When truthy={action === "Update location"}>
         <UpdateLocationDrawer isLoading={isLoading} />
       </When>
+      {/* BIG: front-desk quick actions */}
+      <When truthy={action === "Check out equipment"}>
+        <BigDeskCheckoutDrawer isLoading={isLoading} />
+      </When>
+      <When truthy={action === "Check in equipment"}>
+        <BigDeskCheckinDrawer isLoading={isLoading} />
+      </When>
+      <When truthy={action === "Make a reservation"}>
+        <BigCreateReservationDrawer isLoading={isLoading} />
+      </When>
 
       {/* Action Switcher */}
       <Popover open={open} onOpenChange={setOpen}>
@@ -227,6 +258,9 @@ function getActionScope(action: ActionType) {
     case "Assign custody":
     case "Release custody":
     case "Update location":
+    case "Check out equipment":
+    case "Check in equipment":
+    case "Make a reservation":
       return "bulk";
   }
 }
