@@ -1,4 +1,5 @@
 import type { BookingForEmail } from "~/emails/types";
+import { getMutedUserIds } from "~/modules/big-notification-prefs/service.server";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
 import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
 
@@ -17,8 +18,14 @@ vitest.mock("~/modules/organization/service.server", () => ({
   getOrganizationAdminsForNotification: vitest.fn(),
 }));
 
+// why: external database call — drives who has individually muted an event.
+vitest.mock("~/modules/big-notification-prefs/service.server", () => ({
+  getMutedUserIds: vitest.fn(),
+}));
+
 const mockedGetSettings = vitest.mocked(getBookingNotificationSettingsForOrg);
 const mockedGetAdmins = vitest.mocked(getOrganizationAdminsForNotification);
+const mockedGetMuted = vitest.mocked(getMutedUserIds);
 
 /** Helper to build a mock booking that satisfies BookingForEmail shape */
 function buildMockBooking(
@@ -98,6 +105,8 @@ describe("getBookingNotificationRecipients", () => {
     vitest.clearAllMocks();
     mockedGetSettings.mockResolvedValue(defaultSettings());
     mockedGetAdmins.mockResolvedValue([]);
+    // Nobody has muted anything unless a test says so.
+    mockedGetMuted.mockResolvedValue(new Set<string>());
   });
 
   it("always includes the custodian", async () => {
@@ -417,5 +426,110 @@ describe("getBookingNotificationRecipients", () => {
       (r) => r.email === "" || !r.email
     );
     expect(emptyEmailRecipients).toHaveLength(0);
+  });
+});
+
+/**
+ * BIG: per-user opt-out of the high-volume "other people's bookings" emails.
+ *
+ * The org-level `notifyAdminsOnNewBooking` is all-or-nothing — it silences EVERY
+ * admin at once — so there was no way to stop mailing one over-notified person.
+ * These tests pin the two halves of the rule: a mute silences the ADMIN /
+ * ALWAYS-NOTIFY firehose, and it can NEVER silence an email about a booking the
+ * person is actually responsible for.
+ */
+describe("per-user notification preferences", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockedGetSettings.mockResolvedValue(defaultSettings());
+    mockedGetAdmins.mockResolvedValue([]);
+    mockedGetMuted.mockResolvedValue(new Set<string>());
+  });
+
+  it("drops an admin who muted new reservations, but keeps the others", async () => {
+    mockedGetSettings.mockResolvedValue({
+      ...defaultSettings(),
+      notifyAdminsOnNewBooking: true,
+    });
+    mockedGetAdmins.mockResolvedValue([
+      {
+        id: "admin-muted",
+        email: "muted@example.com",
+        firstName: "Muted",
+        lastName: "Admin",
+      },
+      {
+        id: "admin-loud",
+        email: "loud@example.com",
+        firstName: "Loud",
+        lastName: "Admin",
+      },
+    ] as Awaited<ReturnType<typeof getOrganizationAdminsForNotification>>);
+    mockedGetMuted.mockResolvedValue(new Set(["admin-muted"]));
+
+    const recipients = await getBookingNotificationRecipients({
+      booking: buildMockBooking(),
+      eventType: "RESERVATION",
+      organizationId: "org-1",
+      isSelfServiceOrBase: true,
+    });
+
+    const emails = recipients.map((r) => r.email);
+    expect(emails).not.toContain("muted@example.com");
+    // Silencing one person must not silence the team.
+    expect(emails).toContain("loud@example.com");
+    expect(mockedGetMuted).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      event: "RESERVATION",
+    });
+  });
+
+  it("still emails the CUSTODIAN even when they've muted the event", async () => {
+    // The custodian is holding the gear. Muting "other people's bookings" must
+    // never mute the notice about a booking that is your own responsibility.
+    mockedGetMuted.mockResolvedValue(new Set(["custodian-user-1"]));
+
+    const recipients = await getBookingNotificationRecipients({
+      booking: buildMockBooking(),
+      eventType: "OVERDUE",
+      organizationId: "org-1",
+      isScheduledJob: true,
+    });
+
+    expect(recipients.map((r) => r.email)).toContain("custodian@example.com");
+  });
+
+  it("still emails the CREATOR even when they've muted the event", async () => {
+    mockedGetSettings.mockResolvedValue({
+      ...defaultSettings(),
+      notifyBookingCreator: true,
+    });
+    mockedGetMuted.mockResolvedValue(new Set(["creator-user-1"]));
+
+    const recipients = await getBookingNotificationRecipients({
+      booking: buildMockBooking({
+        creator: {
+          id: "creator-user-1",
+          email: "creator@example.com",
+          firstName: "Cre",
+          lastName: "Ator",
+        },
+      }),
+      eventType: "RESERVATION",
+      organizationId: "org-1",
+    });
+
+    expect(recipients.map((r) => r.email)).toContain("creator@example.com");
+  });
+
+  it("does not consult preferences for events nobody can mute", async () => {
+    await getBookingNotificationRecipients({
+      booking: buildMockBooking(),
+      eventType: "CHECKIN_REMINDER",
+      organizationId: "org-1",
+      isScheduledJob: true,
+    });
+
+    expect(mockedGetMuted).not.toHaveBeenCalled();
   });
 });

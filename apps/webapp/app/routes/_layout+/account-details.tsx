@@ -51,6 +51,8 @@ export const shouldRevalidate = () => false;
 export default function AccountDetailsPage() {
   const items = [
     { to: "general", content: "General" },
+    // BIG: per-user control over the booking emails they receive.
+    { to: "notifications", content: "Notifications" },
     { to: "workspace", content: "Workspaces" },
   ];
 

@@ -17,6 +17,8 @@
  * from non-scheduled notifications so they don't email themselves.
  */
 import type { BookingForEmail } from "~/emails/types";
+import type { MutableNotificationEvent } from "~/modules/big-notification-prefs/service.server";
+import { getMutedUserIds } from "~/modules/big-notification-prefs/service.server";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
 import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
@@ -96,6 +98,25 @@ export type NotificationRecipient = {
  * @param isScheduledJob - When true, skips editor exclusion (no human editor)
  * @returns Deduplicated list of recipients with valid email addresses
  */
+/**
+ * BIG: narrows a booking event to one an individual is allowed to mute, or `null`.
+ *
+ * Only the two high-volume "other people's activity" events are mutable. The rest
+ * (reminders, check-ins, changes, cancellations) always send — they're either
+ * scheduled nudges aimed at the person responsible, or edits someone needs to know
+ * about.
+ *
+ * @param eventType - The booking event being notified
+ * @returns The mutable event, or `null` when this event can't be opted out of
+ */
+function toMutableNotificationEvent(
+  eventType: BookingEventType
+): MutableNotificationEvent | null {
+  return eventType === "RESERVATION" || eventType === "OVERDUE"
+    ? eventType
+    : null;
+}
+
 export async function getBookingNotificationRecipients({
   booking,
   eventType,
@@ -214,6 +235,35 @@ export async function getBookingNotificationRecipients({
           recipient.reason !== "creator" &&
           recipient.reason !== "custodian"
         ) {
+          recipients.delete(email);
+        }
+      }
+    }
+
+    // 7.5 BIG: honour each person's OWN opt-out.
+    //
+    //    The org-level `notifyAdminsOnNewBooking` is all-or-nothing — silencing
+    //    one over-notified admin meant silencing every admin — so staff had no
+    //    way to stop a mail on every single reservation. This drops the people
+    //    who have individually muted THIS event.
+    //
+    //    Only people who are here BECAUSE they're an admin or on the
+    //    always-notify list are eligible. A notification about a booking someone
+    //    is the custodian, creator, or a named recipient of is about their own
+    //    responsibilities — muting the overdue notice for gear in your own hands
+    //    is deliberately not a setting we offer.
+    const mutableEvent = toMutableNotificationEvent(eventType);
+    if (mutableEvent) {
+      const mutedUserIds = await getMutedUserIds({
+        organizationId,
+        event: mutableEvent,
+      });
+
+      for (const [email, recipient] of recipients) {
+        const isOptional =
+          recipient.reason === "admin" || recipient.reason === "always_notify";
+
+        if (isOptional && mutedUserIds.has(recipient.userId)) {
           recipients.delete(email);
         }
       }

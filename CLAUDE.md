@@ -112,16 +112,55 @@ additions on top of upstream's changes.
   vite rejects the client bundle). Core edit: the settings tab list.
 - **Neon CRM integration + multi-path auth** — Neon CRM is the source of truth
   for WHO is an active member, mirrored into a local allowlist table
-  (`NeonAllowlistMember`) by the admin "Sync members from Neon" action. The sync
-  creates NO login accounts/passwords; people sign in by their own method
-  (Google / Microsoft / email OTP / Neon OAuth) and are cross-referenced against
-  the allowlist at signup and at reserve time (plus the per-member
-  `membershipCheckExempt` bypass). Additive: `app/integrations/neon-crm/`,
+  (`NeonAllowlistMember`) by the admin "Sync members from Neon" action (and a
+  nightly worker). The sync creates NO login accounts/passwords; people sign in
+  by their own method (Google / Microsoft / email OTP / Neon OAuth) and are
+  cross-referenced against the allowlist at signup and at reserve time (plus the
+  per-member `membershipCheckExempt` bypass).
+  **The allowlist is a cache, never an oracle** (learned the hard way in July
+  2026, when Neon revoked the API key: syncs failed silently for four days and
+  the gate confidently denied every member who had joined since). So:
+  (1) the gate NEVER denies on a stale/empty/never-synced allowlist — it fails
+  OPEN and logs, because a broken integration must not punish paying members
+  (`isAllowlistTrustworthy`, staleness = `ALLOWLIST_STALE_AFTER_MS`);
+  (2) before denying anyone it falls back to a LIVE Neon lookup, which also
+  self-heals the row — so someone who joins/renews today works immediately, and
+  a member whose login email is a _secondary_ Neon email (the sync only stores
+  "Email 1") still resolves;
+  (3) the sync REFUSES to replace the allowlist with an empty, >50%-shrunken, or
+  truncated pull (it deletes-then-reinserts, so a dropped row = a locked-out
+  member) — `force` overrides the shrink guards, never the truncation guard;
+  (4) every run, success AND failure, is recorded to `NeonSyncStatus` and shown
+  in the admin UI, because a failure nobody can see is a failure that lasts.
+  Neon API notes: v2 uses HTTP Basic (`orgId:apiKey`); keys are bound to a Neon
+  _user_ — disabling that user or regenerating the key invalidates it instantly
+  (401 `code 13`). Pin `NEON-API-VERSION`, and always send
+  `pagination.sortColumn` — Neon guarantees no default ordering, so unsorted
+  paging can silently skip rows. Additive: `app/integrations/neon-crm/`,
   `app/modules/big-neon-auth/`, `app/modules/big-neon-sync/`,
   `app/routes/_auth+/neon-*`, `app/routes/_layout+/settings.member-sync.tsx`.
   Core edits: `login.tsx`, `join.tsx`, `send-otp.tsx`, `otp.tsx`,
   `server/index.ts` (public-route allowlist), the user service,
   `utils/env.ts` (the `NEON_*` vars).
+- **Per-user booking-email preferences** — upstream's notification settings are
+  org-level and all-or-nothing (`BookingSettings.notifyAdminsOnNewBooking` mails
+  EVERY admin on EVERY reservation), so silencing one over-notified person meant
+  silencing the whole team. Adds a per-(user, org) layer
+  (`UserBookingNotificationPreference`): toggles for **new reservations** and
+  **overdue bookings**, editable by the person themselves
+  (`/account-details/notifications`) and by an admin on someone else's behalf
+  (Settings → Team → Users → **Notifications**, gated `teamMember:update`).
+  A MISSING row means "receive everything", so nobody's behaviour changes until
+  they opt out. Crucially the mute applies ONLY to recipients resolved with
+  reason `admin` / `always_notify` — never `custodian` / `creator` /
+  `booking_recipient`, so **nobody can mute the overdue notice for gear in their
+  own hands**. Additive: `app/modules/big-notification-prefs/`
+  (`service.server.ts` + client-safe `shared.ts`),
+  `app/components/big/notification-preferences-form.tsx`, the
+  `account-details.notifications` + `settings.team.users.$userId.notifications`
+  routes. Core edits: the recipient filter in
+  `booking/notification-recipients.server.ts` (step 7.5), the account-details tab
+  array, the user-profile `TABS` array.
 - **Digital loan agreements** — a per-checkout e-signed agreement putting
   liability on the borrower. Additive: `app/modules/big-loan-agreement/`,
   `app/routes/_layout+/loan-agreement.$bookingId.tsx`. Core edit: the checkout

@@ -137,10 +137,22 @@ export default function UserPage() {
     action: PermissionAction.read,
   });
 
+  /* BIG: the Notifications tab lets an admin mute the booking emails THIS user
+   * receives about other people's bookings. Same admin gate the route action
+   * enforces server-side (teamMember:update). */
+  const canManageUserNotifications = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
+  });
+
   const TABS: Item[] = [
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
     ...(canReadUserNotes ? [{ to: "notes", content: "Notes" }] : []),
+    ...(canManageUserNotifications
+      ? [{ to: "notifications", content: "Notifications" }]
+      : []),
   ];
   /**
    * We find the user's role in the current organization
