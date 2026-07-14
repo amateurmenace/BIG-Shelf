@@ -93,8 +93,16 @@ const DURATIONS = [
 ] as const;
 const ALLOWED_DURATION_MINUTES: number[] = DURATIONS.map((d) => d.minutes);
 
-/** How often the board re-fetches its data. */
-const REFRESH_INTERVAL_MS = 60_000;
+/**
+ * How often the board re-fetches its data.
+ *
+ * 30s, not 60s: this is a wall display people walk up to and trust. A booking
+ * made from a phone (or from this very kiosk) taking up to a minute to appear
+ * reads as "the board is wrong", and someone can walk up and tap a slot that was
+ * taken 50 seconds ago. The loader is read-only and cheap, and there is exactly
+ * one wallboard, so polling twice as often costs nothing that matters.
+ */
+const REFRESH_INTERVAL_MS = 30_000;
 
 /**
  * Loads the anonymized board data. Numbers and time windows only — no
