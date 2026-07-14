@@ -3,7 +3,8 @@ import { data, redirect } from "react-router";
 
 import { SendOtpSchema } from "~/modules/auth/components/continue-with-email-form";
 import { sendOTP } from "~/modules/auth/service.server";
-import { assertActiveNeonMemberForSignup } from "~/modules/big-neon-auth/service.server";
+import { assertActiveNeonMemberForOtp } from "~/modules/big-neon-auth/service.server";
+import { findUserByEmail } from "~/modules/user/service.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { error, getActionMethod, parseData } from "~/utils/http.server";
 import { validateNonSSOSignup } from "~/utils/sso.server";
@@ -20,12 +21,19 @@ export async function action({ request }: ActionFunctionArgs) {
           { shouldBeCaptured: false }
         );
 
-        // Only validate SSO for signup attempts
-        if (mode === "signup" || mode === "confirm_signup") {
+        // `mode` is posted by the form, so it cannot decide whether this is a
+        // signup: an OTP for an email with no account CREATES one, whatever the
+        // client called it. Ask the database instead — otherwise /login's
+        // "Continue with OTP" button is a way around both gates below.
+        const isNewAccount = !(await findUserByEmail(email));
+
+        if (mode === "signup" || mode === "confirm_signup" || isNewAccount) {
           await validateNonSSOSignup(email);
-          // BIG: self-signup requires an active Neon membership.
-          await assertActiveNeonMemberForSignup(email);
         }
+
+        // BIG: creating an account requires an active Neon membership. Decided
+        // server-side from the DB, so it holds regardless of the posted `mode`.
+        await assertActiveNeonMemberForOtp(email);
 
         await sendOTP(email);
 

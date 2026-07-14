@@ -41,11 +41,22 @@ const label = "Neon CRM" as const;
 
 /** Neon REST API v2 base URL (production + sandbox share this host). */
 const NEON_API_BASE = "https://api.neoncrm.com/v2";
+/**
+ * The Neon API version we are written against. Neon defaults an unversioned
+ * request to "the latest version", which silently opts us into backwards-
+ * incompatible changes; pinning means a Neon upgrade can't reshape our
+ * responses without us choosing it.
+ */
+const NEON_API_VERSION = "2.11";
 /** Constituent-OAuth token endpoint (org-agnostic host). */
 const NEON_OAUTH_TOKEN_URL = "https://app.neoncrm.com/np/oauth/token";
 /** The value `Account Current Membership Status` takes for an active member. */
 const NEON_ACTIVE_MEMBERSHIP_STATUS = "Active";
-/** Output fields we request when resolving a member. */
+/**
+ * Output fields we request when resolving a member. "Account ID" doubles as the
+ * sort key for paging — Neon requires `sortColumn` to be one of the requested
+ * output fields.
+ */
 const MEMBER_OUTPUT_FIELDS = [
   "Account ID",
   "First Name",
@@ -53,6 +64,21 @@ const MEMBER_OUTPUT_FIELDS = [
   "Email 1",
   "Account Current Membership Status",
 ];
+/**
+ * Sort key for every paged search. Neon documents NO default ordering, so an
+ * unsorted multi-page read may return a row on two pages and another on none —
+ * silently DROPPING members. Because the sync destructively replaces the
+ * allowlist, a dropped member becomes a locked-out member. Always sort.
+ */
+const MEMBER_SORT_COLUMN = "Account ID";
+
+/**
+ * Operator guidance surfaced with a 401. Neon binds an API key to a Neon *user*
+ * account: disabling that user, or regenerating the key, invalidates the key
+ * instantly and returns this same generic "Api key is invalid" for all of them.
+ */
+const NEON_401_HINT =
+  "Neon rejected the API key. Keys belong to a Neon user account — the key is invalidated if it was regenerated or if that user was disabled. Generate a fresh key in Neon (Settings → User Management → the API user → enable API Access, with the 'Read Account' permission) and update NEON_API_KEY.";
 
 /**
  * A resolved Neon constituent as this app cares about it. `neonAccountId` is
@@ -203,12 +229,18 @@ async function neonApiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     });
   }
 
-  const auth = Buffer.from(`${NEON_ORG_ID}:${NEON_API_KEY}`).toString("base64");
+  // Trim: these arrive from Fly secrets / .env, where a stray trailing newline
+  // is easy to introduce and would otherwise produce an indistinguishable
+  // "Api key is invalid" 401.
+  const auth = Buffer.from(
+    `${NEON_ORG_ID.trim()}:${NEON_API_KEY.trim()}`
+  ).toString("base64");
 
   const response = await fetch(`${NEON_API_BASE}${path}`, {
     ...init,
     headers: {
       Authorization: `Basic ${auth}`,
+      "NEON-API-VERSION": NEON_API_VERSION,
       "Content-Type": "application/json",
       Accept: "application/json",
       ...init?.headers,
@@ -218,13 +250,59 @@ async function neonApiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     throw new ShelfError({
       cause: null,
-      message: `Neon API request failed (${response.status})`,
+      // Neon's own words, not a generic wrapper — an admin staring at the sync
+      // button needs to see "Api key is invalid", not "request failed".
+      message: await describeNeonFailure(response),
       additionalData: { path, status: response.status },
       label,
+      // A bad credential is an operator problem, not a bug to page on.
+      shouldBeCaptured: response.status !== 401 && response.status !== 403,
     });
   }
 
   return (await response.json()) as T;
+}
+
+/**
+ * Turns a failed Neon response into a message an admin can act on.
+ *
+ * Neon reports errors as `[{ "code": "13", "message": "Api key is invalid." }]`.
+ * Reading that body is the difference between "Could not list active Neon
+ * members" (which tells an operator nothing) and a message that names the dead
+ * credential and how to replace it.
+ *
+ * @param response - The non-ok Neon response
+ * @returns A human-readable, operator-actionable failure message
+ */
+async function describeNeonFailure(response: Response): Promise<string> {
+  let detail = "";
+  try {
+    const body = await response.text();
+    const parsed: unknown = JSON.parse(body);
+    // Neon returns an ARRAY of {code, message}; fall back to the raw body.
+    const errors = Array.isArray(parsed) ? parsed : [parsed];
+    detail = errors
+      .map((e) => {
+        const err = e as { code?: string | number; message?: string };
+        return err?.message
+          ? `${err.message}${err.code ? ` (Neon code ${err.code})` : ""}`
+          : "";
+      })
+      .filter(Boolean)
+      .join("; ")
+      .trim();
+    if (!detail) {
+      detail = body.slice(0, 200);
+    }
+  } catch {
+    // Body unreadable / not JSON — the status alone still beats nothing.
+  }
+
+  const base = `Neon API request failed (HTTP ${response.status})${
+    detail ? `: ${detail}` : ""
+  }`;
+
+  return response.status === 401 ? `${base} — ${NEON_401_HINT}` : base;
 }
 
 /** Coerces a nullable/empty value to a trimmed string or null. */
@@ -296,7 +374,10 @@ export async function resolveNeonMemberByEmail(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Could not look up the Neon account for that email",
+      message: withCauseDetail(
+        cause,
+        "Could not look up the Neon account for that email"
+      ),
       additionalData: { email },
       label,
     });
@@ -342,7 +423,7 @@ export async function resolveNeonMemberByAccountId(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Could not load the Neon account",
+      message: withCauseDetail(cause, "Could not load the Neon account"),
       additionalData: { accountId },
       label,
     });
@@ -350,28 +431,53 @@ export async function resolveNeonMemberByAccountId(
 }
 
 /**
+ * The outcome of a bulk active-member pull, including enough bookkeeping for the
+ * caller to decide whether the result is COMPLETE enough to destructively
+ * replace the allowlist with.
+ */
+export type NeonActiveMemberList = {
+  /** Active members that have an email (deduped by Neon Account ID). */
+  members: NeonMember[];
+  /** Total matching rows Neon reported, or `null` if it didn't say. */
+  totalResults: number | null;
+  /** Raw rows we actually read across every page (before filtering). */
+  rowsSeen: number;
+  /** False when we stopped before reading every page Neon reported. */
+  complete: boolean;
+};
+
+/**
  * Lists ALL active Neon members by paging through `/accounts/search` filtered on
  * `Account Current Membership Status = "Active"`. Powers the admin "Sync now"
- * bulk pull that provisions/refreshes member logins from Neon.
+ * bulk pull that refreshes the member allowlist.
+ *
+ * Pages are read SEQUENTIALLY and with an explicit sort: `/accounts/search` is
+ * rate-limited to one concurrent request per org, and Neon guarantees no default
+ * ordering, so an unsorted read can skip rows between pages. It also reports
+ * `rowsSeen` / `complete` so the caller can refuse to replace the allowlist with
+ * a truncated pull (a dropped member is a locked-out member).
  *
  * De-duplicates by Neon Account ID and only returns members that have an email
- * (the key we provision shelf users on).
+ * (the key enforcement matches on).
  *
- * @param options.pageSize - Results per page (default 100)
+ * @param options.pageSize - Results per page (default 100; Neon's max is 200)
  * @param options.maxPages - Safety cap on pages fetched (default 100 → 10k members)
- * @returns Every active member Neon returns
+ * @returns The active members plus completeness bookkeeping
  * @throws {ShelfError} If the API is not configured or a request fails
  */
 export async function listActiveNeonMembers(options?: {
   pageSize?: number;
   maxPages?: number;
-}): Promise<NeonMember[]> {
+}): Promise<NeonActiveMemberList> {
   const pageSize = options?.pageSize ?? 100;
   const maxPages = options?.maxPages ?? 100;
 
   try {
     // Keyed by account id so duplicate rows across pages collapse.
     const byAccountId = new Map<string, NeonMember>();
+    let totalResults: number | null = null;
+    let rowsSeen = 0;
+    let complete = false;
 
     for (let currentPage = 0; currentPage < maxPages; currentPage++) {
       const result = await neonApiFetch<{
@@ -388,11 +494,25 @@ export async function listActiveNeonMembers(options?: {
             },
           ],
           outputFields: MEMBER_OUTPUT_FIELDS,
-          pagination: { currentPage, pageSize },
+          pagination: {
+            currentPage,
+            pageSize,
+            // Stable ordering — without it Neon may hand us the same row twice
+            // and another row never. See MEMBER_SORT_COLUMN.
+            sortColumn: MEMBER_SORT_COLUMN,
+            sortDirection: "ASC",
+          },
         }),
       });
 
       const rows = result?.searchResults ?? [];
+      rowsSeen += rows.length;
+
+      if (typeof result?.pagination?.totalResults === "number") {
+        totalResults = result.pagination.totalResults;
+      }
+      const totalPages = result?.pagination?.totalPages ?? 0;
+
       for (const row of rows) {
         const member = mapMemberSearchRow(row);
         // Keep only genuinely-active members we can key on by email.
@@ -401,19 +521,46 @@ export async function listActiveNeonMembers(options?: {
         }
       }
 
-      const totalPages = result?.pagination?.totalPages ?? 0;
-      // Stop when the page came back short or we've covered all pages.
-      if (rows.length < pageSize || currentPage + 1 >= totalPages) {
+      // Stop when the page came back short or we've covered all pages. Reaching
+      // either means we saw everything Neon had; falling out of the loop on
+      // `maxPages` instead leaves `complete` false, and the caller must not
+      // destructively replace the allowlist from a truncated read.
+      if (
+        rows.length < pageSize ||
+        (totalPages > 0 && currentPage + 1 >= totalPages)
+      ) {
+        complete = true;
         break;
       }
     }
 
-    return [...byAccountId.values()];
+    return {
+      members: [...byAccountId.values()],
+      totalResults,
+      rowsSeen,
+      complete,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Could not list active Neon members",
+      // Keep Neon's own diagnosis (e.g. "Api key is invalid (Neon code 13)")
+      // attached — this message is what the admin UI renders.
+      message: withCauseDetail(cause, "Could not list active Neon members"),
       label,
     });
   }
+}
+
+/**
+ * Prefixes a caller-facing summary onto the underlying failure's message, so
+ * re-wrapping an error never hides WHY it failed. Without this, a 401 from Neon
+ * surfaced to admins as a bare "Could not list active Neon members".
+ *
+ * @param cause - The error being wrapped
+ * @param summary - The caller-facing summary
+ * @returns "summary: underlying detail", or just the summary when there is none
+ */
+function withCauseDetail(cause: unknown, summary: string): string {
+  const detail = cause instanceof Error ? cause.message.trim() : "";
+  return detail ? `${summary}: ${detail}` : summary;
 }

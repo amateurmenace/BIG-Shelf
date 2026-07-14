@@ -30,22 +30,25 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { mapAuthSession } from "~/modules/auth/mappers.server";
 import {
   findNeonAllowlistMemberByEmail,
+  isAllowlistTrustworthy,
   isEmailOnNeonAllowlist,
+  refreshAllowlistMemberFromNeon,
 } from "~/modules/big-neon-sync/service.server";
-import { createUserOrAttachOrg } from "~/modules/user/service.server";
+import {
+  createUserOrAttachOrg,
+  findUserByEmail,
+} from "~/modules/user/service.server";
 import { NEON_MEMBER_ORG_ID, SESSION_SECRET } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { MEMBERSHIP_REQUIRED_MESSAGE } from "./shared";
 
 const label = "Neon Auth" as const;
 
-/**
- * The member-facing message shown wherever the active-Neon-membership check
- * fails — at social/email signup and when a member tries to reserve without an
- * active membership. Points them to renew or reach out to staff.
- */
-export const MEMBERSHIP_REQUIRED_MESSAGE =
-  "We couldn't verify an active BIG membership for this account. If you think this is a mistake, email jessica@brooklineinteractive.org — or sign up for a BIG Membership at https://brooklineinteractive.app.neoncrm.com/forms/membership.";
+// Lives in `shared.ts` so route COMPONENTS can render it without importing this
+// server-only module (which would drag Prisma/Supabase into the client bundle).
+// Re-exported here so existing server-side imports keep working.
+export { MEMBERSHIP_REQUIRED_MESSAGE } from "./shared";
 
 /** How long a Neon OAuth `state` token is valid — one login round-trip. */
 const STATE_TTL_SECONDS = 60 * 10;
@@ -234,18 +237,79 @@ export async function assertActiveNeonMemberForSignup(
   }
 
   const member = await findNeonAllowlistMemberByEmail(email);
-  if (!member) {
-    throw new ShelfError({
-      cause: null,
-      title: "Active membership required",
-      message: MEMBERSHIP_REQUIRED_MESSAGE,
-      label,
-      status: 403,
-      shouldBeCaptured: false,
-    });
+  if (member) {
+    return member;
   }
 
-  return member;
+  // Not on the list. Before turning away someone who may have joined Neon
+  // minutes ago, ask Neon directly — a nightly snapshot is not grounds to reject
+  // a brand-new member at the door. A hit self-heals the allowlist.
+  try {
+    const live = await refreshAllowlistMemberFromNeon(email);
+    if (live) {
+      return live;
+    }
+  } catch (cause) {
+    // Neon is unreachable / misconfigured. We can't confirm they're a member,
+    // but we equally can't confirm they aren't — and signup is the worst place
+    // to guess wrong. Log loudly and let them through; the reserve gate re-checks.
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Could not verify Neon membership at signup; allowing signup (fail-open). Fix the Neon sync.",
+        additionalData: { email },
+        label,
+      })
+    );
+    return null;
+  }
+
+  throw new ShelfError({
+    cause: null,
+    title: "Active membership required",
+    message: MEMBERSHIP_REQUIRED_MESSAGE,
+    label,
+    status: 403,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * The signup gate for the OTP flow, decided from the DATABASE rather than from
+ * what the client said it was doing.
+ *
+ * Supabase's email-OTP flow CREATES an account for an unknown email — there is no
+ * such thing as "just logging in" with an address that has no account yet. But
+ * the membership gate used to hang off the `mode` field posted by the form
+ * (`signup` vs `login`), which is client-supplied. So anyone could go to /login,
+ * click "Continue with OTP" (which posts `mode=login`), and be handed a real
+ * account with a personal workspace, never once meeting the membership check.
+ * `/resend-otp` had no gate at all.
+ *
+ * The fix is to stop asking the form and start asking the database: if no Shelf
+ * user exists for this email, completing this OTP will MINT one — that is a
+ * signup, whatever the form claimed, and it must pass the same gate as `/join`.
+ *
+ * @param email - The email an OTP is about to be sent to / verified for
+ * @throws {ShelfError} 403 when this would create an account for a non-member
+ */
+export async function assertActiveNeonMemberForOtp(
+  email: string
+): Promise<void> {
+  if (!isNeonApiConfigured()) {
+    return;
+  }
+
+  // An existing user is a genuine login — nothing is being created, so the
+  // signup gate doesn't apply. (Lapsed members are still stopped at the point
+  // that actually matters: reserving.)
+  const existingUser = await findUserByEmail(email);
+  if (existingUser) {
+    return;
+  }
+
+  await assertActiveNeonMemberForSignup(email);
 }
 
 /**
@@ -284,13 +348,23 @@ export async function linkNeonAccountByEmail(email: string): Promise<void> {
  * - their MEMBER row is `membershipCheckExempt` (an admin-invited non-Neon user
  *   — volunteer, partner);
  * - Neon isn't configured (fail-open so an install works before creds are wired);
- * - their email is on the synced active-member allowlist (`NeonAllowlistMember`).
+ * - their email is on the synced active-member allowlist (`NeonAllowlistMember`);
+ * - the allowlist ISN'T TRUSTWORTHY (never synced / empty / stale) — a broken
+ *   integration must not punish paying members;
+ * - Neon itself, asked live, says they're an active member (covers someone who
+ *   joined or renewed since the last nightly sync).
  *
- * The check is a local table lookup — no live Neon call — so it's fast and
- * offline-safe; the admin re-syncs to refresh membership. Fails OPEN (returns
- * true) if the local lookup itself errors, so a DB blip never blocks
- * reservations. Returns false ONLY on a definitive "is a non-exempt MEMBER,
- * Neon is configured, and the email is not on the allowlist".
+ * ## Denial is the expensive mistake
+ *
+ * This gate exists to stop a lapsed member reserving. It is NOT worth locking out
+ * a paying member to achieve that. So every uncertain path — a DB blip, a stale
+ * allowlist, an unreachable Neon — resolves to ALLOW, loudly logged. Only a
+ * definitive "the allowlist is fresh, they're not on it, and Neon confirms
+ * they're not active" returns false.
+ *
+ * That ordering is deliberate: the local allowlist answers the overwhelming
+ * majority of checks with a single indexed lookup, and Neon is only consulted on
+ * the path where we would otherwise deny someone.
  *
  * @param args.userId - The user whose membership is in question
  * @param args.organizationId - The workspace the reservation is in
@@ -325,16 +399,44 @@ export async function isMemberReservationEligible({
     return true;
   }
 
+  const email = membership.user.email;
+
   try {
-    // On the synced active-member allowlist → allowed; otherwise definitively not.
-    return await isEmailOnNeonAllowlist(membership.user.email);
+    // The common case: a single indexed lookup on the synced allowlist.
+    if (await isEmailOnNeonAllowlist(email)) {
+      return true;
+    }
+
+    // They're not on the list — but is the list even worth believing? A revoked
+    // API key once froze it for four days while this gate confidently denied
+    // every member who had joined since. A broken sync is our problem, not theirs.
+    if (!(await isAllowlistTrustworthy())) {
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message:
+            "Neon allowlist is stale/empty (the sync is failing) — allowing the reservation rather than blocking a possibly-active member (fail-open). Fix the Neon sync.",
+          additionalData: { userId, organizationId },
+          label,
+        })
+      );
+      return true;
+    }
+
+    // The list is fresh and they're not on it. Before denying a real person, ask
+    // Neon directly — they may have joined or renewed since last night's sync.
+    // A hit self-heals the allowlist, so this costs one API call, once.
+    const live = await refreshAllowlistMemberFromNeon(email);
+    return Boolean(live);
   } catch (cause) {
-    // Local lookup errored → fail OPEN so a DB blip doesn't block reservations.
+    // Something we depend on broke (the DB, or Neon itself). We cannot VERIFY
+    // they're inactive, and "couldn't verify" must never render as "not a
+    // member" — fail OPEN and make the failure loud.
     Logger.error(
       new ShelfError({
         cause,
         message:
-          "Neon allowlist check failed at reservation time; allowing the reservation (fail-open).",
+          "Could not verify Neon membership at reservation time; allowing the reservation (fail-open).",
         additionalData: { userId, organizationId },
         label,
       })

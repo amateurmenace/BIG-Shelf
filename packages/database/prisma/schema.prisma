@@ -126,6 +126,9 @@ model User {
   // Admin notes authored on team member profiles
   teamMemberNotesAuthored TeamMemberNote[] @relation("TeamMemberNoteAuthor")
 
+  /// BIG: per-workspace control over which booking emails this person receives.
+  bookingNotificationPreferences UserBookingNotificationPreference[]
+
   @@unique([email, username])
   @@index([firstName, lastName])
   // Indexes for foreign keys
@@ -798,6 +801,9 @@ model Organization {
   roleChangeLogs        RoleChangeLog[]
   teamMemberNotes       TeamMemberNote[]
   activityEvents        ActivityEvent[]
+
+  /// BIG: per-user booking-email preferences scoped to this workspace.
+  bookingNotificationPreferences UserBookingNotificationPreference[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -2254,6 +2260,72 @@ model NeonAllowlistMember {
   updatedAt     DateTime @updatedAt
 
   @@index([neonAccountId])
+}
+
+/// BIG: per-user, per-workspace control over the booking emails a person receives
+/// ABOUT OTHER PEOPLE'S BOOKINGS — the ones they get because they're an admin, or
+/// because they're on the org's always-notify list.
+///
+/// The org-level knobs (`BookingSettings.notifyAdminsOnNewBooking`) are
+/// all-or-nothing: they silence EVERY admin at once, so there was no way to stop
+/// emailing one person without stopping emails to all of them. Staff were getting
+/// a mail on every single reservation with no way out short of silencing the
+/// whole team. This is the per-person layer.
+///
+/// Deliberately does NOT cover a booking the person is the custodian, creator, or
+/// a named recipient of. Nobody gets to mute the overdue notice for gear that is
+/// in their own hands — those emails are about their own responsibilities, not
+/// about noise from other people's activity.
+///
+/// A missing row means "receive everything" (see `NOTIFICATION_PREFERENCE_DEFAULTS`),
+/// so the table only ever holds people who have actually changed something.
+model UserBookingNotificationPreference {
+  id String @id @default(cuid())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+
+  /// Email this person when SOMEONE ELSE's booking is reserved.
+  notifyOnReservation Boolean @default(true)
+  /// Email this person when SOMEONE ELSE's booking goes overdue.
+  notifyOnOverdue Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One preference row per person per workspace.
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+/// Health of the Neon allowlist sync — a SINGLE row (`id = "singleton"`).
+///
+/// `NeonAllowlistMember.syncedAt` only records SUCCESS: when a sync fails the
+/// allowlist silently keeps its stale rows and there is nowhere to record that
+/// the refresh failed. That is precisely how a revoked Neon API key froze the
+/// allowlist for four days without anyone noticing, while the reserve gate went
+/// on denying members who had joined since.
+///
+/// The admin UI reads this to show sync health, and the reserve gate reads it to
+/// decide whether the allowlist is fresh enough to be trusted as a denial.
+model NeonSyncStatus {
+  /// Always "singleton" — this table holds exactly one row.
+  id String @id @default("singleton")
+
+  /// When a sync run last STARTED (whether it went on to succeed or fail).
+  lastAttemptAt DateTime?
+  /// When a sync run last SUCCEEDED — the allowlist's true freshness.
+  lastSuccessAt DateTime?
+  /// Failure message from the most recent run; cleared on success.
+  lastError String?
+  /// Rows written by the last successful run.
+  activeCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

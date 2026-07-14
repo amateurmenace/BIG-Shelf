@@ -13,7 +13,10 @@ import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
-import { linkNeonAccountByEmail } from "~/modules/big-neon-auth/service.server";
+import {
+  assertActiveNeonMemberForSignup,
+  linkNeonAccountByEmail,
+} from "~/modules/big-neon-auth/service.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -92,6 +95,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
         const userExists = Boolean(await findUserByEmail(email));
 
         if (!userExists) {
+          // BIG: THE choke point. Whatever route mailed the code, this is where
+          // an account comes into existence — so this is where the membership
+          // gate has to hold. Gating only the send paths left the account
+          // creation itself unguarded.
+          await assertActiveNeonMemberForSignup(email);
+
           try {
             const username = await generateUniqueUsername(authSession.email);
             await createUser({

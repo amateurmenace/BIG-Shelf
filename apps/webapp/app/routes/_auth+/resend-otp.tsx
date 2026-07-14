@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { sendOTP } from "~/modules/auth/service.server";
+import { assertActiveNeonMemberForOtp } from "~/modules/big-neon-auth/service.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 
 import {
@@ -30,6 +31,11 @@ export async function action({ request }: ActionFunctionArgs) {
           }),
           { shouldBeCaptured: false }
         );
+
+        // BIG: this endpoint took any email and mailed a code, with no gate at
+        // all — and the code it mails is enough to MINT an account at /otp. Gate
+        // it exactly like /send-otp, or closing that hole just moves it here.
+        await assertActiveNeonMemberForOtp(email);
 
         await sendOTP(email);
         return payload({ success: true });

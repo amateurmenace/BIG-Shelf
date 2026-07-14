@@ -160,7 +160,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     // "sync" refreshes the allowlist from Neon (no accounts created).
-    const synced: NeonAllowlistSyncResult = await syncNeonAllowlist();
+    // `force` overrides the safety guards that refuse to empty or halve the
+    // allowlist — an admin uses it only when a big drop is genuinely real.
+    const synced: NeonAllowlistSyncResult = await syncNeonAllowlist({
+      force: formData.get("force") === "1",
+    });
     return payload({ synced });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -251,10 +255,18 @@ export default function MemberSyncSettings() {
             </Form>
           </div>
 
+          {/* Sync health — the thing whose absence let a revoked API key freeze
+              the allowlist for four days while members were quietly denied. */}
+          <SyncHealth status={status} />
+
           {synced ? (
             <p className="text-sm font-medium text-success-600">
               Synced {synced.activeCount} active member
-              {synced.activeCount === 1 ? "" : "s"} from Neon.
+              {synced.activeCount === 1 ? "" : "s"} from Neon
+              {synced.removedCount > 0
+                ? ` (${synced.removedCount} no longer active)`
+                : ""}
+              .
             </p>
           ) : null}
 
@@ -291,10 +303,83 @@ export default function MemberSyncSettings() {
       )}
 
       {errorMessage ? (
-        <p className="text-sm text-error-500">{errorMessage}</p>
+        <div className="flex flex-col items-start gap-2 rounded border border-error-300 bg-error-25 px-4 py-3">
+          <p className="text-sm text-error-600">{errorMessage}</p>
+          {/* The guards that refuse to empty/halve the allowlist say so in their
+              message and tell the admin to re-run with force. Offer the escape
+              hatch right here rather than making them hunt for it. */}
+          {/force/i.test(errorMessage) ? (
+            <Form method="post">
+              <input type="hidden" name="intent" value="sync" />
+              <input type="hidden" name="force" value="1" />
+              <Button type="submit" variant="secondary" disabled={disabled}>
+                {disabled ? "Syncing…" : "Force sync anyway"}
+              </Button>
+            </Form>
+          ) : null}
+        </div>
       ) : null}
 
       {check ? <CheckResult check={check} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Sync-health panel: shows a FAILING sync, and warns when the allowlist has gone
+ * stale enough that the reserve gate has stopped trusting it.
+ *
+ * This exists because the old UI showed only a member count and a "last synced"
+ * date. When Neon revoked BIG's API key, the nightly sync failed silently for
+ * four days: the count stayed put, the date quietly went stale, and members who
+ * joined in the meantime were told their membership was inactive. A failure that
+ * nobody can see is a failure that lasts.
+ */
+function SyncHealth({ status }: { status: NeonAllowlistStatus }) {
+  if (!status.lastError && status.trustworthy) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {status.lastError ? (
+        <div className="rounded border border-error-300 bg-error-25 px-4 py-3">
+          <p className="text-sm font-medium text-error-700">
+            The last sync failed
+            {status.lastAttemptAt ? (
+              <>
+                {" "}
+                (<DateS date={status.lastAttemptAt} includeTime />)
+              </>
+            ) : null}
+          </p>
+          <p className="mt-1 break-words text-sm text-error-600">
+            {status.lastError}
+          </p>
+          <p className="mt-1 text-xs text-gray-600">
+            The allowlist still holds the last good list — it hasn&apos;t been
+            emptied — but it stops picking up new and renewing members until the
+            sync works again.
+          </p>
+        </div>
+      ) : null}
+
+      {!status.trustworthy ? (
+        <div className="rounded border border-[#FFE082] bg-[#FFF8E1] px-4 py-3 text-sm text-gray-700">
+          <p className="font-medium">
+            {status.distrustReason === "never-synced"
+              ? "The allowlist has never been synced."
+              : status.distrustReason === "empty"
+              ? "The allowlist is empty."
+              : "The allowlist is out of date."}{" "}
+            Membership isn&apos;t being enforced right now.
+          </p>
+          <p className="mt-1 text-gray-600">
+            Rather than block members using a list it can&apos;t trust, the app
+            is letting them reserve. Fix the sync to turn enforcement back on.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

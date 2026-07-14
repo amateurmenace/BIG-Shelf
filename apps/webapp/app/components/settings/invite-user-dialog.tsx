@@ -1,12 +1,14 @@
 import type { ReactElement } from "react";
-import { cloneElement, useCallback, useEffect, useState } from "react";
+import { cloneElement, useCallback, useEffect, useRef, useState } from "react";
 import { OrganizationRoles } from "@prisma/client";
 import { UserIcon } from "lucide-react";
+import { useFetcher } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
+import type { loader as membershipCheckLoader } from "~/routes/api+/big-membership-check";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -71,6 +73,55 @@ const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.SELF_SERVICE]: "Self service",
 };
 
+/**
+ * BIG: inline verdict on whether the invitee can actually reserve.
+ *
+ * Deliberately a WARNING, not a block — staff have good reasons to invite ahead
+ * of a membership purchase. It exists so the failure surfaces here, to the person
+ * who can fix it, rather than to the invitee at the last step of a booking.
+ *
+ * "unknown" (Neon unreachable) is shown neutrally: not being able to check must
+ * never be presented as "not a member".
+ */
+function MembershipWarning({
+  state,
+  name,
+}: {
+  state?: "active" | "inactive" | "unknown" | "unconfigured";
+  name?: string | null;
+}) {
+  if (!state || state === "unconfigured") {
+    return null;
+  }
+
+  if (state === "active") {
+    return (
+      <p className="text-[13px] text-success-600">
+        ✓ Active BIG member{name ? ` (${name})` : ""} — they’ll be able to
+        reserve.
+      </p>
+    );
+  }
+
+  if (state === "unknown") {
+    return (
+      <p className="text-[13px] text-gray-500">
+        Couldn’t reach Neon to check this membership. The invite will still
+        send.
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded border border-[#FFE082] bg-[#FFF8E1] px-3 py-2 text-[13px] text-gray-700">
+      <span className="font-medium">Not an active BIG member.</span> They can
+      sign in, but they’ll be blocked when they try to reserve. Tick{" "}
+      <span className="font-medium">“Doesn’t require a BIG membership”</span>{" "}
+      above to let them reserve anyway.
+    </div>
+  );
+}
+
 export default function InviteUserDialog({
   className,
   trigger,
@@ -89,6 +140,44 @@ export default function InviteUserDialog({
 
   const zo = useZorm("NewQuestionWizardScreen", InviteUserFormSchema);
 
+  /**
+   * BIG: inviting a MEMBER runs no Neon check, so staff could invite someone who
+   * signs in happily and is then refused at "Reserve". Check the email as soon as
+   * we know both the role and the address, and warn before the invite goes out.
+   */
+  const [role, setRole] = useState<string>("");
+  const [isExempt, setIsExempt] = useState(false);
+  const [email, setEmail] = useState("");
+  const membershipCheck = useFetcher<typeof membershipCheckLoader>();
+
+  const needsMembership = role === OrganizationRoles.MEMBER && !isExempt;
+  const normalizedEmail = email.trim().toLowerCase();
+  const shouldCheck = needsMembership && validEmail(normalizedEmail);
+
+  // Fires on email blur AND when the role is switched to Member afterwards. The
+  // ref makes it idempotent: without it, the fetcher's changing identity would
+  // re-run the effect and re-request the same email in a loop.
+  const lastChecked = useRef<string | null>(null);
+  useEffect(() => {
+    if (!shouldCheck || lastChecked.current === normalizedEmail) {
+      return;
+    }
+    lastChecked.current = normalizedEmail;
+    void membershipCheck.load(
+      `/api/big-membership-check?email=${encodeURIComponent(normalizedEmail)}`
+    );
+  }, [shouldCheck, normalizedEmail, membershipCheck]);
+
+  // `payload()` always sets `error: null`, so the key is present on BOTH the
+  // success and failure shapes — narrow on its VALUE, not its presence.
+  const check =
+    membershipCheck.data && !membershipCheck.data.error
+      ? membershipCheck.data
+      : undefined;
+  // Only warn while the answer still describes what's on screen (the admin may
+  // have since ticked "exempt" or changed the role).
+  const membershipWarning = shouldCheck ? check?.state : undefined;
+
   /** Handle server-side validation errors as fallback */
   const validationErrors = getValidationErrors<typeof InviteUserFormSchema>(
     fetcher.data?.error
@@ -101,6 +190,10 @@ export default function InviteUserDialog({
   const closeDialog = useCallback(() => {
     zo.form?.reset();
     setMessageCharCount(0);
+    setRole("");
+    setIsExempt(false);
+    setEmail("");
+    lastChecked.current = null;
     setIsDialogOpen(false);
     onClose && onClose();
   }, [onClose, zo.form]);
@@ -194,7 +287,7 @@ export default function InviteUserDialog({
 
               <SelectGroup>
                 <SelectLabel className="pl-0">Role</SelectLabel>
-                <Select name="role">
+                <Select name="role" value={role} onValueChange={setRole}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select user role" />
                   </SelectTrigger>
@@ -240,6 +333,8 @@ export default function InviteUserDialog({
                   id="membershipCheckExempt"
                   name={zo.fields.membershipCheckExempt()}
                   disabled={disabled}
+                  checked={isExempt}
+                  onChange={(e) => setIsExempt(e.target.checked)}
                   className="mt-0.5 size-4 rounded border-gray-300 text-primary-600"
                 />
                 <span className="text-[14px] text-gray-600">
@@ -266,8 +361,14 @@ export default function InviteUserDialog({
                   label={"Email address"}
                   placeholder="zaans@huisje.com"
                   required
+                  onBlur={(e) => setEmail(e.currentTarget.value)}
                 />
               </div>
+
+              {/* BIG: warn BEFORE the invite goes out that this person won't be
+                  able to reserve — the failure otherwise surfaces to them, days
+                  later, at the last step of a booking. */}
+              <MembershipWarning state={membershipWarning} name={check?.name} />
 
               <div className="pt-1.5">
                 <label
