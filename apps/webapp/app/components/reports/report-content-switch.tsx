@@ -13,6 +13,7 @@
  * @see {@link file://./../../routes/_layout+/reports.$reportId.tsx}
  */
 
+import type { SupplyUsageReportRow } from "~/modules/reports/supply-usage.server";
 import type {
   AssetActivityRow,
   AssetInventoryRow,
@@ -41,6 +42,7 @@ import { IdleAssetsContent } from "./idle-assets-content";
 import { MonthlyBookingTrendsContent } from "./monthly-booking-trends-content";
 import { OverdueItemsContent } from "./overdue-items-content";
 import { ReportEmptyState } from "./report-empty-state";
+import { SupplyUsageContent } from "./supply-usage-content";
 import { TopBookedAssetsContent } from "./top-booked-assets-content";
 import { TopBookedKitsContent } from "./top-booked-kits-content";
 import type { ReportRowHandlers } from "./use-report-row-handlers";
@@ -215,6 +217,18 @@ export function ReportContentSwitch({
         />
       );
 
+    // BIG: pooled consumables & accessories.
+    case "supply-usage":
+      return (
+        <SupplyUsageContent
+          rows={rows as SupplyUsageReportRow[]}
+          kpis={kpis}
+          totalRows={totalRows}
+          timeframeLabel={timeframe.label}
+          chartSeries={chartSeries}
+        />
+      );
+
     case "asset-activity":
       return (
         <AssetActivityContent
@@ -246,6 +260,8 @@ export function ReportContentSwitch({
 
 function getEmptyStateTitle(reportId: string): string {
   switch (reportId) {
+    case "supply-usage":
+      return "No supplies used in this period";
     case "booking-compliance":
       return "No bookings to analyze";
     case "overdue-items":

@@ -62,6 +62,8 @@ export default function SettingsPage() {
     ...(!_isPersonalOrg ? [{ to: "bookings", content: "Bookings" }] : []),
     ...(!_isPersonalOrg ? [{ to: "emails", content: "Emails" }] : []),
     { to: "custom-fields", content: "Custom fields" },
+    // BIG: pooled consumables & accessories (cables, batteries, adapters).
+    ...(!_isPersonalOrg ? [{ to: "supplies", content: "Supplies" }] : []),
     { to: "team", content: "Team" },
     // BIG: bulk member sync from Neon CRM (admin-only, org-scoped).
     ...(!_isPersonalOrg ? [{ to: "member-sync", content: "Member sync" }] : []),
@@ -80,6 +82,7 @@ export default function SettingsPage() {
       (item) =>
         ![
           "custom-fields",
+          "supplies",
           "team",
           "general",
           "bookings",

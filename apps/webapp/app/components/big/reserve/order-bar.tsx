@@ -32,10 +32,20 @@ function OrderBarInner() {
     return null;
   }
 
+  /**
+   * BIG: `?addTo=<bookingId>` means the member is adding gear to a reservation
+   * they already have (e.g. the room they just booked). Carry it through to
+   * checkout so the order joins that booking instead of creating a second one.
+   */
+  const addTo = new URLSearchParams(location.search).get("addTo");
+  const checkoutTo = addTo
+    ? `/reserve/order?addTo=${encodeURIComponent(addTo)}`
+    : "/reserve/order";
+
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
       <Link
-        to="/reserve/order"
+        to={checkoutTo}
         className="pointer-events-auto flex w-full max-w-md items-center justify-between gap-3 rounded-full bg-gray-900 px-5 py-3 text-white shadow-xl transition hover:bg-gray-800"
       >
         <span className="flex items-center gap-2 text-sm font-medium">

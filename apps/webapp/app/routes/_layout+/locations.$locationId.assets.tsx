@@ -319,13 +319,25 @@ export default function LocationAssets() {
               >
                 Scan
               </Button>
+              {/* BIG: create gear that isn't in the system yet without
+                  leaving the location. `?location=` — already honoured by the
+                  asset form's location field — drops it straight in here. */}
+              <Button
+                to={`/assets/new?location=${location.id}`}
+                variant="secondary"
+                width="full"
+                className="whitespace-nowrap"
+                tooltip="Create an asset that isn't in the system yet"
+              >
+                New asset
+              </Button>
               <Button
                 to="manage-assets"
                 variant="primary"
                 width="full"
                 className="whitespace-nowrap"
               >
-                Add assets
+                Add existing
               </Button>
             </When>
           </div>

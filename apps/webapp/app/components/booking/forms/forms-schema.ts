@@ -191,9 +191,13 @@ interface BookingFormSchemaParams {
     maxBookingLengthSkipClosedDays: boolean; // Whether to skip closed days in max booking length calculation
   };
   /**
-   * When true, time restrictions (bufferStartTime and maxBookingLength) are skipped.
-   * This should be set to true for ADMIN and OWNER users who should be able to
-   * create bookings without time restrictions.
+   * When true, ALL time restrictions are skipped — `bufferStartTime`,
+   * `maxBookingLength` AND the org's working hours.
+   *
+   * BIG: working hours describe when the *public* may collect and return
+   * equipment, so they are a self-service constraint. Staff routinely need to
+   * book outside them (evening shoots, weekend events, equipment that leaves
+   * on Friday and comes back Monday), so ADMIN/OWNER are exempt.
    */
   isAdminOrOwner?: boolean;
 }
@@ -235,12 +239,16 @@ export function BookingFormSchema({
   } = bookingSettings;
 
   // For ADMIN/OWNER users, time restrictions (buffer and max length) are bypassed
-  // They can still be restricted by working hours if enabled
   const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
   const effectiveMaxBookingLength = isAdminOrOwner ? null : maxBookingLength;
 
-  // Transform and validate working hours data
-  const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
+  // Transform and validate working hours data.
+  // BIG: working hours gate self-service reservations only — staff book at any
+  // hour — so we drop the config entirely for ADMIN/OWNER rather than
+  // special-casing each call to `validateWorkingHours` below.
+  const workingHours = isAdminOrOwner
+    ? null
+    : normalizeWorkingHoursForValidation(rawWorkingHours);
 
   // Base schema - let TypeScript infer the complex Zod types
   const baseSchema = z.object({
@@ -420,9 +428,9 @@ interface ExtendBookingSchemaParams {
     "bufferStartTime" | "maxBookingLength" | "maxBookingLengthSkipClosedDays"
   >;
   /**
-   * When true, time restrictions (bufferStartTime and maxBookingLength) are skipped.
-   * This should be set to true for ADMIN and OWNER users who should be able to
-   * extend bookings without time restrictions.
+   * When true, ALL time restrictions are skipped — `bufferStartTime`,
+   * `maxBookingLength` AND the org's working hours. See the note on
+   * `BookingFormSchemaParams.isAdminOrOwner`.
    */
   isAdminOrOwner?: boolean;
 }
@@ -437,12 +445,14 @@ export function ExtendBookingSchema({
     bookingSettings;
 
   // For ADMIN/OWNER users, time restrictions (buffer and max length) are bypassed
-  // They can still be restricted by working hours if enabled
   const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
   const effectiveMaxBookingLength = isAdminOrOwner ? null : maxBookingLength;
 
-  // Transform and validate working hours data (same as BookingFormSchema)
-  const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
+  // Transform and validate working hours data (same as BookingFormSchema) —
+  // BIG: staff are exempt, so the config is dropped for ADMIN/OWNER.
+  const workingHours = isAdminOrOwner
+    ? null
+    : normalizeWorkingHoursForValidation(rawWorkingHours);
 
   return z
     .object({

@@ -2571,6 +2571,9 @@ describe("extendBooking", () => {
         { id: "asset-2", status: AssetStatus.CHECKED_OUT },
       ],
       partialCheckins: [],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
     const extendedBooking = {
       ...mockBooking,
@@ -2632,6 +2635,9 @@ describe("extendBooking", () => {
       custodianUserId: "user-1",
       assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
       partialCheckins: [],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -2712,6 +2718,9 @@ describe("extendBooking", () => {
       custodianUserId: "user-2", // Different user is custodian
       assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
       partialCheckins: [],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -2746,6 +2755,9 @@ describe("extendBooking", () => {
       custodianUserId: "user-1", // But user is custodian
       assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
       partialCheckins: [],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -2780,6 +2792,9 @@ describe("extendBooking", () => {
       custodianUserId: "user-2", // But different custodian
       assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
       partialCheckins: [],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -2816,6 +2831,9 @@ describe("extendBooking", () => {
         { id: "asset-2", status: AssetStatus.CHECKED_OUT },
       ],
       partialCheckins: [],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     const clashingBooking = {
@@ -2850,6 +2868,9 @@ describe("extendBooking", () => {
       status: BookingStatus.ONGOING,
       assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
       partialCheckins: [],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     //@ts-expect-error missing vitest type
@@ -2883,6 +2904,9 @@ describe("extendBooking", () => {
       to: new Date("2025-01-01T17:00:00Z"),
       assets: [{ id: "asset-1", status: AssetStatus.CHECKED_OUT }],
       partialCheckins: [],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     const extendedBooking = {
@@ -2931,6 +2955,9 @@ describe("extendBooking", () => {
         { id: "asset-3", status: AssetStatus.CHECKED_OUT }, // Still checked out
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     const extendedBooking = {
@@ -2979,6 +3006,9 @@ describe("extendBooking", () => {
         { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     const extendedBooking = {
@@ -3020,6 +3050,9 @@ describe("extendBooking", () => {
         { id: "asset-2", status: AssetStatus.CHECKED_OUT }, // Still checked out - has conflict
       ],
       partialCheckins: [{ assetIds: ["asset-1"] }],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     const clashingBooking = {
@@ -3060,6 +3093,9 @@ describe("extendBooking", () => {
         { id: "asset-3", status: AssetStatus.AVAILABLE }, // Returned
       ],
       partialCheckins: [{ assetIds: ["asset-1", "asset-2", "asset-3"] }],
+      // BIG: extendBooking now selects the booking's rooms so an
+      // extension can be rejected when it would double-book one.
+      rooms: [],
     };
 
     //@ts-expect-error missing vitest type

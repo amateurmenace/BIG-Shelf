@@ -1,4 +1,9 @@
-import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
+import {
+  data,
+  useParams,
+  type LoaderFunctionArgs,
+  type MetaFunction,
+} from "react-router";
 import { z } from "zod";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -77,6 +82,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 export default function KitAssets() {
   const { roles } = useUserRoleHelper();
+  /** The kit this tab belongs to — used to pre-fill a newly created asset. */
+  const { kitId } = useParams();
 
   const userRoleCanManageAssets = userHasPermission({
     roles,
@@ -111,13 +118,25 @@ export default function KitAssets() {
               >
                 Scan
               </Button>
+              {/* BIG: gear that isn't in the system yet used to mean leaving
+                  the kit, creating the asset, coming back and adding it.
+                  `?kit=` carries the kit through so the new asset lands here. */}
+              <Button
+                to={`/assets/new?kit=${kitId ?? ""}`}
+                variant="secondary"
+                width="full"
+                className="whitespace-nowrap"
+                tooltip="Create an asset that isn't in the system yet"
+              >
+                New asset
+              </Button>
               <Button
                 to="manage-assets?status=AVAILABLE"
                 variant="primary"
                 width="full"
                 className="whitespace-nowrap"
               >
-                Add assets
+                Add existing
               </Button>
             </div>
           </When>

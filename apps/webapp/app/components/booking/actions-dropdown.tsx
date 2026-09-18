@@ -60,8 +60,14 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     action: PermissionAction.cancel,
   });
 
+  /**
+   * BIG: RESERVED is included so the return date of a reservation that has not
+   * been collected yet can be moved without reverting the booking to DRAFT
+   * (which would release its hold on the assets).
+   * @see extendBooking in ~/modules/booking/service.server.ts
+   */
   const canExtendBooking =
-    (isOngoing || isOverdue) &&
+    (isReserved || isOngoing || isOverdue) &&
     userHasPermission({
       roles,
       entity: PermissionEntity.booking,
@@ -134,7 +140,9 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
               width="full"
               to="duplicate"
             >
-              Duplicate booking
+              {/* BIG: "Repeat" is what people call it — same gear, same person,
+                  fresh dates. "Duplicate" read like a data operation. */}
+              Repeat this booking
             </Button>
           </DropdownMenuItem>
 

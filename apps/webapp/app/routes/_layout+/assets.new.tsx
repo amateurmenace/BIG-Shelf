@@ -5,6 +5,7 @@ import { data, redirect, redirectDocument, useLoaderData } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
+import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { estimateNextSequentialId } from "~/modules/asset/sequential-id.server";
 import {
@@ -29,6 +30,7 @@ import {
   payload,
   error,
   getCurrentSearchParams,
+  getRefererPath,
   parseData,
 } from "~/utils/http.server";
 import { wrapLinkForNote, wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
@@ -94,6 +96,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       currency: currentOrganization?.currency,
       customFields,
       nextSequentialId,
+      // why: the form's Cancel button needs somewhere to go back to. Without
+      // it the button rendered as a typeless <button> inside the form and
+      // submitted instead of cancelling.
+      referer: getRefererPath(request),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -175,6 +181,25 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       ? extractBarcodesFromFormData(formData)
       : [];
 
+    /**
+     * BIG: `?kit=` lets the Kit page's "New asset" button create gear that
+     * lands straight in that kit — previously this meant leaving the kit,
+     * creating the asset, navigating back and adding it.
+     *
+     * The id comes from the URL, so it is proven to belong to the caller's
+     * organization before it is connected.
+     * @see .claude/rules/org-scope-user-supplied-ids.md
+     */
+    const requestedKitId = new URL(request.url).searchParams.get("kit");
+    const kitId = requestedKitId
+      ? (
+          await db.kit.findFirst({
+            where: { id: requestedKitId, organizationId },
+            select: { id: true },
+          })
+        )?.id
+      : undefined;
+
     const asset = await createAsset({
       organizationId,
       title,
@@ -183,6 +208,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       categoryId: category,
       locationId: newLocationId,
       qrId,
+      kitId,
       tags,
       valuation,
       customFieldsValues,
@@ -252,12 +278,18 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
 export default function NewAssetPage() {
   const title = useAtomValue(dynamicTitleAtom);
-  const { nextSequentialId } = useLoaderData<typeof loader>();
+  const { nextSequentialId, referer } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
 
   // Get category from URL params or use the default passed prop
   const categoryFromUrl = searchParams.get("category");
+  /**
+   * BIG: `?location=` pre-selects the location, so the Location page's "New
+   * asset" button drops the new item straight onto that shelf. The value is a
+   * plain default for the picker; the server validates whatever is submitted.
+   */
+  const locationFromUrl = searchParams.get("location");
 
   return (
     <div className="relative">
@@ -266,7 +298,9 @@ export default function NewAssetPage() {
         <AssetForm
           qrId={qrId}
           categoryId={categoryFromUrl}
+          locationId={locationFromUrl}
           sequentialId={nextSequentialId}
+          referer={referer}
         />
       </div>
     </div>

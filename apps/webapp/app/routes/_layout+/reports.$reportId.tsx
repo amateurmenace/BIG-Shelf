@@ -46,6 +46,7 @@ import {
   type BookingComplianceSortColumn,
 } from "~/modules/reports/helpers.server";
 import { getReportById } from "~/modules/reports/registry";
+import { supplyUsageReport } from "~/modules/reports/supply-usage.server";
 import type {
   ChartSeries,
   ComplianceData,
@@ -247,6 +248,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
+        page: parseInt(url.searchParams.get("page") || "1", 10),
+        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+      });
+      break;
+
+    // BIG: pooled consumables & accessories.
+    case "supply-usage":
+      reportData = await supplyUsageReport({
+        organizationId,
+        timeframe,
         page: parseInt(url.searchParams.get("page") || "1", 10),
         pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
       });

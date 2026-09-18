@@ -64,8 +64,8 @@ export default function CreateBookingDialog({
             <div className="mb-5">
               <h4>Create new booking</h4>
               <p>
-                Choose a name for your booking, select a start and end time and
-                choose the custodian. Based on the selected information, asset
+                Choose a name for your booking, pick a start and end time, and
+                say who it is for. Based on the selected information, asset
                 availability will be determined.
               </p>
             </div>

@@ -1,5 +1,7 @@
 import { BookingStatus } from "@prisma/client";
 import { useLoaderData } from "react-router";
+import { BookingAcceptanceBanner } from "~/components/big/booking/acceptance-banner";
+import { BookingSuppliesCard } from "~/components/big/supply/booking-supplies-card";
 import { formatBookingDuration } from "~/modules/booking/helpers";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
@@ -30,8 +32,23 @@ export function BookingPageContent() {
       : booking.custodianUserId === member?.userId
   );
 
+  /**
+   * Supplies can be changed while a booking is still live. Mirrors the
+   * manage-supplies route's own status gate — completed, cancelled and
+   * archived bookings keep the record of what actually went out.
+   */
+  const supplyLockedStatuses: BookingStatus[] = [
+    BookingStatus.COMPLETE,
+    BookingStatus.CANCELLED,
+    BookingStatus.ARCHIVED,
+  ];
+  const canManageSupplies = !supplyLockedStatuses.includes(booking.status);
+
   return (
     <div className="md:mt-4">
+      {/* BIG: "someone reserved this for you — do you want it?" Renders nothing
+          unless the booking was made on another person's behalf. */}
+      <BookingAcceptanceBanner />
       {booking.status === BookingStatus.CANCELLED &&
         booking.cancellationReason && (
           <div className="mb-4 rounded-lg border border-warning-200 bg-warning-25 p-4">
@@ -39,6 +56,15 @@ export function BookingPageContent() {
             <p className="text-sm ">{booking.cancellationReason}</p>
           </div>
         )}
+      {/* BIG: the equipment list leads. What is *in* a booking is what staff
+          and members open it to check; the name/date/custodian form is
+          reference detail they scroll to. The two sections were flipped from
+          upstream's form-first order. */}
+      <div className="mb-8 flex-1">
+        <BookingAssetsColumn />
+        {/* BIG: pooled supplies sit with the equipment, not in the form. */}
+        <BookingSuppliesCard canManage={canManageSupplies} />
+      </div>
       <div className="mb-8 flex h-full flex-col items-stretch gap-2 lg:mb-2 lg:flex-row">
         <Card className="-mx-4 my-0 lg:mx-0 lg:w-2/3">
           <EditBookingForm
@@ -70,9 +96,6 @@ export function BookingPageContent() {
             status={booking.status}
           />
         </Card>
-      </div>
-      <div className="flex-1">
-        <BookingAssetsColumn />
       </div>
     </div>
   );

@@ -361,8 +361,10 @@ export default function BookingsIndexPage({
               <Th>From</Th>
               <Th>To</Th>
               <Th>Tags</Th>
-              <Th>Custodian</Th>
+              <Th>Reserved for</Th>
               <Th>Created by</Th>
+              {/* BIG: "Repeat" — one click to re-make a past reservation. */}
+              <Th />
             </>
           }
           headerExtraContent={
@@ -557,6 +559,29 @@ const ListBookingsContent = ({
           }
           name={resolveUserDisplayName(item?.creator)}
         />
+      </Td>
+
+      {/*
+       * BIG: "Repeat" — the same gear, the same person, fresh dates. People
+       * book the same rig every week; re-picking fifteen items by hand each
+       * time was the single most common complaint about the list. Opens the
+       * duplicate modal, which creates a DRAFT for review rather than
+       * reserving anything outright.
+       */}
+      <Td className="text-right">
+        <Button
+          to={`/bookings/${item.id}/overview/duplicate`}
+          variant="secondary"
+          size="sm"
+          className="whitespace-nowrap"
+          tooltip="Make a new reservation with the same items"
+          onClick={(event) => {
+            // The row itself navigates to the booking; keep the click here.
+            event.stopPropagation();
+          }}
+        >
+          Repeat
+        </Button>
       </Td>
     </>
   );

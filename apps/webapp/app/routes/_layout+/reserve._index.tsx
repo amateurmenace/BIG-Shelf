@@ -238,6 +238,8 @@ export default function MemberHomeDashboard() {
   const [searchParams] = useSearchParams();
   // "1" = a room was just booked; "order" = an equipment order was reserved.
   const justBooked = searchParams.get("booked");
+  /** The reservation that was just made, so we can offer to add gear to it. */
+  const justBookedId = searchParams.get("bookingId");
 
   return (
     <div>
@@ -254,6 +256,22 @@ export default function MemberHomeDashboard() {
             </span>{" "}
             You&apos;ll find it under &ldquo;Coming up&rdquo; below, and a
             confirmation email is on its way.
+            {/* BIG: a room booking usually needs gear too. Offering it here
+                keeps it on the SAME reservation — one thing to collect, one
+                thing to return — instead of a second overlapping booking. */}
+            {justBooked === "1" && justBookedId ? (
+              <div className="mt-2">
+                <Button
+                  to={`/reserve/equipment?addTo=${encodeURIComponent(
+                    justBookedId
+                  )}`}
+                  variant="secondary"
+                  size="sm"
+                >
+                  Add equipment to this booking
+                </Button>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -475,10 +493,12 @@ export default function MemberHomeDashboard() {
           </p>
         )}
 
-        {/* Put BIG Shelf on the phone's home screen */}
+        {/* Put BIG Shelf on the phone's home screen. why: `md:hidden` — the
+            instructions only apply to a phone/tablet, so the tip is noise on a
+            desktop where there is no "Add to Home Screen". */}
         <Link
           to="/reserve/app"
-          className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm transition hover:border-primary-300 md:px-6"
+          className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 shadow-sm transition hover:border-primary-300 md:hidden"
         >
           <SmartphoneIcon
             className="size-5 shrink-0 text-primary-600"

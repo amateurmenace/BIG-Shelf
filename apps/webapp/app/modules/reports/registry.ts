@@ -125,6 +125,21 @@ export const REPORTS: ReportDefinition[] = [
     exportable: true,
   },
   {
+    // BIG: pooled consumables & accessories. Sits under "bookings" because the
+    // question it answers — do we own enough cables for the bookings we take? —
+    // is a booking question, not an asset one.
+    id: "supply-usage",
+    title: "Supply Usage",
+    description:
+      "How hard your cables, batteries and accessories are working \u2014 and which ones you keep running out of.",
+    category: "bookings",
+    icon: "Cable",
+    enabled: true,
+    filters: [],
+    hasChart: true,
+    exportable: true,
+  },
+  {
     id: "asset-activity",
     title: "Asset Activity Summary",
     description:

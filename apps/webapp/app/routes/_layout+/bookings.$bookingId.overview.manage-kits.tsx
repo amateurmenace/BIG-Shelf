@@ -34,6 +34,11 @@ import {
   KitAvailabilityLabel,
 } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import {
+  ManageBookingTabs,
+  manageBookingTabUrl,
+  type ManageBookingTab,
+} from "~/components/booking/manage-booking-tabs";
 import styles from "~/components/booking/styles.css?url";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
@@ -43,13 +48,7 @@ import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
-import { GrayBadge } from "~/components/shared/gray-badge";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "~/components/shared/tabs";
+import { Tabs, TabsContent } from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
@@ -506,18 +505,26 @@ export default function AddKitsToBooking() {
     [bookingKitIds, selectedBulkItems]
   );
 
-  const manageAssetsUrl = `/bookings/${
-    booking.id
-  }/overview/manage-assets?${new URLSearchParams({
+  /** Availability window params the equipment picker needs. */
+  const bookingWindowParams = new URLSearchParams({
     // This button wouldnt be available at all if there is no booking.from and booking.to
     bookingFrom: booking.from.toISOString(),
     bookingTo: booking.to.toISOString(),
     hideUnavailable: "true",
     unhideAssetsBookigIds: booking.id,
-  })}`;
+  }).toString();
+
+  const manageAssetsUrl = manageBookingTabUrl(
+    "assets",
+    booking.id,
+    bookingWindowParams
+  );
 
   const totalAssetsSelected = booking.assets.filter((a) => !a.kitId).length;
   const hasUnsavedChanges = selectedBulkItems.length !== bookingKitIds.length;
+
+  /** Destination for the unsaved-changes alert — whichever tab was clicked. */
+  const [pendingTabUrl, setPendingTabUrl] = useState(manageAssetsUrl);
 
   /**
    * Set selected items for kit based on the route data.
@@ -557,35 +564,28 @@ export default function AddKitsToBooking() {
     <Tabs
       className="flex h-full max-h-full flex-col"
       value="kits"
-      onValueChange={() => {
+      onValueChange={(value) => {
+        // BIG: four destinations now (Equipment / Kits / Rooms / Supplies).
+        const destination = manageBookingTabUrl(
+          value as ManageBookingTab,
+          booking.id,
+          value === "assets" ? bookingWindowParams : undefined
+        );
         if (hasUnsavedChanges) {
+          setPendingTabUrl(destination);
           setIsAlertOpen(true);
           return;
         }
 
-        void navigate(manageAssetsUrl);
+        void navigate(destination);
       }}
     >
-      <div className="border-b px-6 py-2">
-        <TabsList className="w-full">
-          <TabsTrigger className="flex-1 gap-x-2" value="assets">
-            Assets{" "}
-            {totalAssetsSelected > 0 ? (
-              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {totalAssetsSelected}
-              </GrayBadge>
-            ) : null}
-          </TabsTrigger>
-          <TabsTrigger className="flex-1 gap-x-2" value="kits">
-            Kits
-            {selectedBulkItemsCount > 0 ? (
-              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {selectedBulkItemsCount}
-              </GrayBadge>
-            ) : null}
-          </TabsTrigger>
-        </TabsList>
-      </div>
+      <ManageBookingTabs
+        counts={{
+          assets: totalAssetsSelected,
+          kits: selectedBulkItemsCount,
+        }}
+      />
 
       <Filters
         slots={{ "right-of-search": <AvailabilitySelect label="kits" /> }}
@@ -658,7 +658,7 @@ export default function AddKitsToBooking() {
               />
             ))}
             {hasUnsavedChanges && isAlertOpen ? (
-              <input name="redirectTo" value={manageAssetsUrl} type="hidden" />
+              <input name="redirectTo" value={pendingTabUrl} type="hidden" />
             ) : null}
             <Button
               type="submit"
@@ -676,7 +676,7 @@ export default function AddKitsToBooking() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          void navigate(manageAssetsUrl);
+          void navigate(pendingTabUrl);
         }}
         onYes={() => {
           void submit(formRef.current);

@@ -25,7 +25,7 @@ import type {
   Organization,
   User,
 } from "@prisma/client";
-import { AssetGuideKind } from "@prisma/client";
+import { AssetGuideKind, BookingStatus } from "@prisma/client";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import type { ClientHint } from "~/utils/client-hints";
@@ -34,6 +34,7 @@ import {
   createBooking,
   deleteBooking,
   reserveBooking,
+  updateBookingAssets,
 } from "../booking/service.server";
 
 const label = "Booking" as const;
@@ -335,6 +336,7 @@ export async function createEquipmentReservation({
   custodianUserId,
   hints,
   isSelfServiceOrBase,
+  attachToBookingId,
 }: {
   organizationId: Organization["id"];
   assetIds: Asset["id"][];
@@ -348,6 +350,17 @@ export async function createEquipmentReservation({
   custodianUserId: string | null;
   hints: ClientHint;
   isSelfServiceOrBase: boolean;
+  /**
+   * BIG: when set, the equipment is ADDED to this existing reservation rather
+   * than becoming a new one. Used by the "I also need equipment" path from a
+   * room booking, so a member who books a room and then grabs a camera ends up
+   * with ONE reservation for the afternoon, not two overlapping ones that each
+   * need collecting and returning separately.
+   *
+   * The booking must belong to the same organization AND to the same person —
+   * both are checked below.
+   */
+  attachToBookingId?: Booking["id"] | null;
 }) {
   const uniqueAssetIds = [...new Set(assetIds)];
   if (uniqueAssetIds.length === 0) {
@@ -380,6 +393,76 @@ export async function createEquipmentReservation({
       status: 400,
       label,
       shouldBeCaptured: false,
+    });
+  }
+
+  /**
+   * Attach-to-existing path. Deliberately separate from the create path: it
+   * must not touch the booking's name, dates or custodian, only add assets.
+   */
+  if (attachToBookingId) {
+    const target = await db.booking.findFirst({
+      where: { id: attachToBookingId, organizationId },
+      select: {
+        id: true,
+        status: true,
+        custodianUserId: true,
+        custodianTeamMemberId: true,
+      },
+    });
+
+    if (!target) {
+      throw new ShelfError({
+        cause: null,
+        title: "Reservation not found",
+        message:
+          "The reservation you are adding to no longer exists. Try making a new one.",
+        additionalData: { organizationId, attachToBookingId },
+        status: 404,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // Only the person the reservation belongs to may add to it. Without this,
+    // any member could append gear to anyone else's booking by guessing an id.
+    const isOwnBooking =
+      target.custodianUserId === custodianUserId ||
+      target.custodianTeamMemberId === custodianTeamMemberId;
+    if (!isOwnBooking) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message: "You can only add equipment to your own reservation.",
+        additionalData: { organizationId, attachToBookingId, creatorId },
+        status: 403,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const attachableStatuses: BookingStatus[] = [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
+    ];
+    if (!attachableStatuses.includes(target.status)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Too late to change this reservation",
+        message:
+          "This reservation has already started or finished, so equipment can no longer be added to it. Make a new reservation instead.",
+        additionalData: { organizationId, attachToBookingId },
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
+    return updateBookingAssets({
+      id: target.id,
+      organizationId,
+      assetIds: uniqueAssetIds,
+      userId: creatorId,
     });
   }
 

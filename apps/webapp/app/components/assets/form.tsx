@@ -664,7 +664,12 @@ const Actions = ({
     </Button>
 
     <ButtonGroup>
-      <Button to={referer} variant="secondary" disabled={disabled}>
+      {/* why: `to` must never be undefined — the Button type-guard falls back to
+          rendering a bare <button> with no `type`, which HTML defaults to
+          `submit`, so "Cancel" silently SAVED the asset instead of leaving.
+          `/assets` is the safe fallback when there is no referer (e.g. the New
+          asset page opened directly or in a new tab). */}
+      <Button to={referer || "/assets"} variant="secondary" disabled={disabled}>
         Cancel
       </Button>
       <AddAnother disabled={disabled} />

@@ -17,10 +17,13 @@ import AssetGrowthChart from "~/components/home/asset-growth-chart";
 import KpiCards from "~/components/home/kpi-cards";
 import LocationDistribution from "~/components/home/location-distribution";
 import OverdueBookings from "~/components/home/overdue-bookings";
+import QuickActions from "~/components/home/quick-actions";
+import TodayPanel from "~/components/home/today-panel";
 import UpcomingBookings from "~/components/home/upcoming-bookings";
 import UpcomingReminders from "~/components/home/upcoming-reminders";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { getUpcomingRemindersForHomePage } from "~/modules/asset-reminder/service.server";
 import { getCurrentOrganizationRole } from "~/modules/big-member/service.server";
@@ -62,6 +65,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     twelveMonthsAgo.setDate(1);
     twelveMonthsAgo.setHours(0, 0, 0, 0);
 
+    /**
+     * BIG: "today" for the operational KPI row. Computed in the SERVER's local
+     * calendar day, which for a single-site lending library (one timezone) is
+     * the right day boundary and avoids threading client hints through every
+     * count below.
+     */
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+
     // Fetch all data in parallel — targeted queries instead of loading all assets
     const [
       // 1a. Aggregated asset stats
@@ -93,6 +107,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       locationDistribution,
       locationsCount,
       categoriesCount,
+      // BIG: operational "right now" counts for the dashboard's KPI row
+      assetsOutCount,
+      dueBackTodayCount,
+      pickingUpTodayCount,
+      overdueBookingsCount,
       // Cookie
       cookieResult,
     ] = await Promise.all([
@@ -289,6 +308,34 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         where: { organizationId },
       }),
 
+      // BIG: how much gear is out of the building right now.
+      db.asset.count({
+        where: { organizationId, status: "CHECKED_OUT" },
+      }),
+
+      // BIG: bookings due back before midnight tonight — today's returns desk.
+      db.booking.count({
+        where: {
+          organizationId,
+          status: { in: ["ONGOING", "OVERDUE"] },
+          to: { gte: todayStart, lt: todayEnd },
+        },
+      }),
+
+      // BIG: reservations being collected today — today's pick list.
+      db.booking.count({
+        where: {
+          organizationId,
+          status: "RESERVED",
+          from: { gte: todayStart, lt: todayEnd },
+        },
+      }),
+
+      // BIG: overdue right now. The one number worth interrupting someone for.
+      db.booking.count({
+        where: { organizationId, status: "OVERDUE" },
+      }),
+
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
     ]);
@@ -307,6 +354,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       teamMembersCount,
       locationsCount,
       categoriesCount,
+      // BIG: operational counts driving the "today" KPI row
+      assetsOutCount,
+      dueBackTodayCount,
+      pickingUpTodayCount,
+      overdueBookingsCount,
       // Widget data
       upcomingBookings,
       overdueBookings,
@@ -372,27 +424,56 @@ export default function HomePage() {
 
   return (
     <div>
-      <Header> </Header>
+      {/* BIG: quick actions live in the header's top-right so the two things
+          staff do most often from the dashboard — start a booking, add an
+          asset — are one click away. `/bookings/new` is a full page (the
+          CreateBookingDialog needs the bookings-index loader data, which the
+          dashboard does not have). */}
+      <Header>
+        <Button
+          to="/assets/new"
+          variant="secondary"
+          icon="asset"
+          className="whitespace-nowrap"
+        >
+          New asset
+        </Button>
+        <Button
+          to="/bookings/new"
+          icon="bookings"
+          className="whitespace-nowrap"
+        >
+          New booking
+        </Button>
+      </Header>
       {completedAllChecks || skipOnboardingChecklist ? (
-        <div className="pb-8">
+        <div className="flex flex-col gap-6 pb-8 pt-4">
           <AnnouncementBar />
 
-          {/* KPI Summary Cards */}
-          <div className="mt-4">
-            <KpiCards />
-          </div>
+          {/*
+           * BIG: the dashboard is ordered by urgency, top to bottom.
+           *
+           * 1. What needs doing today (the four operational counts)
+           * 2. How to do it (quick actions)
+           * 3. What is happening (the booking pipeline)
+           * 4. Everything else — reminders, charts, inventory shape
+           *
+           * The old inventory KPIs (total assets / categories / locations /
+           * team members) moved to the bottom: true, but nobody opens the
+           * dashboard to find out how many categories exist.
+           */}
+          <TodayPanel />
 
-          {/* BIG: Row 1 (top) — the booking pipeline up front (Upcoming, Active,
-              Overdue). The Asset Growth chart that used to fill this slot now
-              sits at the bottom of the dashboard. */}
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <QuickActions />
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <UpcomingBookings />
             <ActiveBookings />
             <OverdueBookings />
           </div>
 
           {/* Widget Grid — 3-column rows */}
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {/* Inventory value + Reminders, Status & Locations */}
             <InventoryValueChart />
             <UpcomingReminders />
@@ -401,15 +482,15 @@ export default function HomePage() {
           </div>
 
           {/* Row: People & Assets — 2-column */}
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <CustodiansList />
             <NewestAssets />
           </div>
 
-          {/* BIG: Asset Growth trend moved to the bottom (least time-sensitive). */}
-          <div className="mt-4">
-            <AssetGrowthChart />
-          </div>
+          <AssetGrowthChart />
+
+          {/* Collection shape — reference, not a daily read. */}
+          <KpiCards />
         </div>
       ) : (
         <OnboardingChecklist />

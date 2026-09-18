@@ -26,7 +26,7 @@ import { useEffect, useMemo } from "react";
 import { RoomStatus, type Prisma } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { data, redirect, Form, useLoaderData } from "react-router";
+import { data, redirect, Form, useLoaderData, useNavigate } from "react-router";
 import { z } from "zod";
 import {
   selectedBulkItemsAtom,
@@ -35,6 +35,11 @@ import {
   setSelectedBulkItemAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
+import {
+  ManageBookingTabs,
+  manageBookingTabUrl,
+  type ManageBookingTab,
+} from "~/components/booking/manage-booking-tabs";
 import styles from "~/components/booking/styles.css?url";
 import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
@@ -43,6 +48,7 @@ import type { ListItemData } from "~/components/list/list-item";
 import { RoomBadge } from "~/components/rooms/room-badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
+import { Tabs } from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
@@ -285,8 +291,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
  * @returns The manage-rooms picker UI
  */
 export default function ManageRoomsForBooking() {
-  const { items, bookingRoomIds } = useLoaderData<typeof loader>();
+  const { booking, items, bookingRoomIds } = useLoaderData<typeof loader>();
   const disabled = useDisabled();
+  const navigate = useNavigate();
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
@@ -325,12 +332,32 @@ export default function ManageRoomsForBooking() {
   }, [items, setDisabledBulkItems]);
 
   return (
-    <div className="flex h-full max-h-full flex-col">
-      <div className="border-b px-6 py-2">
-        <GrayBadge className="border border-primary-200 bg-primary-50 text-primary-700">
-          {selectedBulkItemsCount} selected
-        </GrayBadge>
-      </div>
+    <Tabs
+      className="flex h-full max-h-full flex-col"
+      value="rooms"
+      activationMode="manual"
+      onValueChange={(value) => {
+        // BIG: rooms are now one tab of the single "add to this booking"
+        // picker rather than a separate destination. There is no unsaved-change
+        // guard here because the room selection is committed by the footer form
+        // and nothing else is in flight.
+        void navigate(
+          manageBookingTabUrl(
+            value as ManageBookingTab,
+            booking.id,
+            value === "assets" || value === "kits"
+              ? new URLSearchParams({
+                  bookingFrom: new Date(booking.from).toISOString(),
+                  bookingTo: new Date(booking.to).toISOString(),
+                  hideUnavailable: "true",
+                  unhideAssetsBookigIds: booking.id,
+                }).toString()
+              : undefined
+          )
+        );
+      }}
+    >
+      <ManageBookingTabs counts={{ rooms: selectedBulkItemsCount }} />
 
       <Filters
         className="justify-between !border-t-0 border-b px-6 md:flex"
@@ -392,12 +419,12 @@ export default function ManageRoomsForBooking() {
               value="manageRooms"
               disabled={disabled}
             >
-              Confirm
+              Save rooms
             </Button>
           </Form>
         </div>
       </footer>
-    </div>
+    </Tabs>
   );
 }
 

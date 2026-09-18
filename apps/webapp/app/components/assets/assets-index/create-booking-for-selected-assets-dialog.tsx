@@ -3,11 +3,11 @@ import { useAtomValue } from "jotai";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { CustodianField } from "~/components/booking/forms/fields/custodian";
 import { DatesFields } from "~/components/booking/forms/fields/dates";
 import { DescriptionField } from "~/components/booking/forms/fields/description";
 import { NameField } from "~/components/booking/forms/fields/name";
 import { NotificationRecipientsField } from "~/components/booking/forms/fields/notification-recipients";
+import { ReservedForField } from "~/components/booking/forms/fields/reserved-for";
 import type { BookingFormSchemaType } from "~/components/booking/forms/forms-schema";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
@@ -62,6 +62,9 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const defaultTeamMember = isBaseOrSelfService
     ? teamMembersToUse.find((tm) => tm.userId === user!.id)
     : undefined;
+
+  /** The signed-in user's own team-member row, backing the "Myself" choice. */
+  const ownTeamMember = teamMembersToUse.find((tm) => tm.userId === user?.id);
 
   const userCanSeeCustodian = userCanViewSpecificCustody({
     roles,
@@ -129,9 +132,13 @@ export default function CreateBookingForSelectedAssetsDialog() {
               />
             </Card>
             <Card className="m-0 mb-2">
-              <CustodianField
+              {/* BIG: "Custodian" became "Reserved for" — myself (the default)
+                  or someone else, who is then emailed to confirm. */}
+              <ReservedForField
+                ownTeamMember={ownTeamMember}
                 defaultTeamMember={defaultTeamMember}
-                disabled={disabled || isBaseOrSelfService}
+                disabled={disabled}
+                lockedToSelf={isBaseOrSelfService}
                 userCanSeeCustodian={userCanSeeCustodian}
                 isNewBooking
                 error={

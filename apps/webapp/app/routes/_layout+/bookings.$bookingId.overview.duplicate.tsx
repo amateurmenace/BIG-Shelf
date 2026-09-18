@@ -22,7 +22,7 @@ import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ bookingId: z.string() });
 
-export const meta = () => [{ title: appendToMetaTitle("Duplicate booking") }];
+export const meta = () => [{ title: appendToMetaTitle("Repeat booking") }];
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -75,10 +75,10 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     });
 
     sendNotification({
-      title: "Booking duplicated",
+      title: "Booking repeated",
       senderId: userId,
       icon: { name: "success", variant: "success" },
-      message: `Booking "${newBooking.name}" has been duplicated.`,
+      message: `A draft copy of "${newBooking.name}" is ready — set the dates and reserve it.`,
     });
 
     return redirect(`/bookings/${newBooking.id}`);
@@ -96,16 +96,17 @@ export default function DuplicateBooking() {
 
   return (
     <div>
-      <h3 className="mb-2">Duplicate Booking: {booking.name}</h3>
+      <h3 className="mb-2">Repeat booking: {booking.name}</h3>
 
       <div className="mb-4 text-sm text-gray-500">
         <p className="mb-2">
-          You're about to duplicate the booking{" "}
-          <strong className="text-black">{booking.name}</strong>.
+          This makes a new booking with the same equipment and the same person,
+          starting today.
         </p>
         <p>
-          All current booking details will be copied. You can review and edit
-          them later.
+          It is created as a <strong className="text-black">draft</strong> —
+          nothing is reserved and no equipment is held until you set the dates
+          and confirm it.
         </p>
       </div>
 
@@ -127,7 +128,7 @@ export default function DuplicateBooking() {
 
         <Form method="POST" className="flex-1">
           <Button type="submit" className="w-full" disabled={disabled}>
-            Confirm
+            Repeat booking
           </Button>
         </Form>
       </div>

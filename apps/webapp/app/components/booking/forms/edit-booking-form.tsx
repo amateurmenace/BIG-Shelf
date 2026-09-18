@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
 import { useAtom } from "jotai";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -23,20 +23,22 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { Form } from "../../custom-form";
-import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
+import { ReservedForField } from "./fields/reserved-for";
 import TagField from "./fields/tag-field";
+import type { BookingFormSchemaType } from "./forms-schema";
+import { BookingFormSchema } from "./forms-schema";
 import { AbsolutePositionedHeaderActions } from "../../layout/header/absolute-positioned-header-actions";
 import { Button } from "../../shared/button";
 import When from "../../when/when";
 import { ActionsDropdown } from "../actions-dropdown";
+import { BookingOverviewPDF } from "../booking-overview-pdf";
 import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
-import type { BookingFormSchemaType } from "./forms-schema";
-import { BookingFormSchema } from "./forms-schema";
+import ExtendBookingDialog from "../extend-booking-dialog";
 
 type BookingFlags = {
   hasAssets: boolean;
@@ -83,6 +85,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
 
   const bookingStatus = useBookingStatusHelpers(status);
   const {
+    booking: loaderBooking,
     teamMembers,
     teamMembersForForm,
     userId,
@@ -128,6 +131,32 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     isOwner,
     isSelfService,
   } = useUserRoleHelper();
+
+  /**
+   * Data for the promoted Print button. `booking.assets` lives on the loader's
+   * booking (the form's `booking` prop carries only the editable fields), and
+   * the timestamp is only used to name the generated file.
+   */
+  const bookingAssets = loaderBooking?.assets ?? [];
+  const printTimeStamp = useMemo(() => new Date().getTime(), []);
+
+  /**
+   * "Change dates" mirrors the Actions-menu entry: the end date can be moved on
+   * a reservation that has not been collected yet, and on one that is already
+   * out or overdue. DRAFT bookings edit their dates in the form below, so they
+   * do not need it.
+   */
+  const canChangeDates =
+    Boolean(
+      bookingStatus?.isReserved ||
+        bookingStatus?.isOngoing ||
+        bookingStatus?.isOverdue
+    ) &&
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.extend,
+    });
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -177,6 +206,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
+  /** The signed-in user's own team-member row, backing the "Myself" choice. */
+  const ownTeamMember = teamMembersToUse?.find((m) => m.userId === userId);
+
   const userCanSeeCustodian = userCanViewSpecificCustody({
     roles,
     custodianUserId: defaultTeamMember?.user?.id,
@@ -224,6 +256,49 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
           <div className="flex flex-1 items-center justify-between gap-2">
             <When truthy={isBase}>
               <BookingProcessSidebar />
+            </When>
+
+            {/* BIG: Print and "Change dates" are promoted out of the Actions
+                menu — a printed pull-sheet is part of every checkout, and
+                moving a return date was previously three clicks deep. */}
+            <BookingOverviewPDF
+              booking={{
+                id: booking.id,
+                name: booking.name,
+                assets: bookingAssets,
+              }}
+              timeStamp={printTimeStamp}
+              trigger={
+                <Button
+                  type="button"
+                  variant="secondary"
+                  icon="print"
+                  className="whitespace-nowrap"
+                  disabled={
+                    bookingAssets.length === 0 && {
+                      reason: "Add assets to this booking before printing it.",
+                    }
+                  }
+                >
+                  Print
+                </Button>
+              }
+            />
+
+            <When truthy={canChangeDates}>
+              <ExtendBookingDialog
+                currentEndDate={endDate}
+                trigger={
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    icon="calendar"
+                    className="whitespace-nowrap"
+                  >
+                    Change dates
+                  </Button>
+                }
+              />
             </When>
 
             {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
@@ -433,15 +508,16 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 />
               </div>
               <div className="mt-[10px]">
-                <CustodianField
-                  key={`${id}-custodian`}
+                {/* BIG: "Custodian" became "Reserved for" — see the field's
+                    module doc. Same `custodian` wire format underneath. */}
+                <ReservedForField
+                  key={`${id}-reserved-for`}
+                  ownTeamMember={ownTeamMember}
                   defaultTeamMember={defaultTeamMember}
                   disabled={
-                    disabled ||
-                    isLoadingWorkingHours ||
-                    isBaseOrSelfService ||
-                    inputFieldIsDisabled
+                    disabled || isLoadingWorkingHours || inputFieldIsDisabled
                   }
+                  lockedToSelf={isBaseOrSelfService}
                   userCanSeeCustodian={userCanSeeCustodian}
                   error={
                     validationErrors?.custodian?.message ||

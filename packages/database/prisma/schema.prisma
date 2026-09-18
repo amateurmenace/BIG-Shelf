@@ -2279,6 +2279,151 @@ model NeonAllowlistMember {
 ///
 /// A missing row means "receive everything" (see `NOTIFICATION_PREFERENCE_DEFAULTS`),
 /// so the table only ever holds people who have actually changed something.
+// ─────────────────────────────────────────────────────────────────────────────
+// BIG: Booking acceptance ("reserved on behalf of")
+// Additive-only — plain FK columns, no relations added to the upstream Booking
+// model. When a staff member reserves equipment FOR someone else, the booking
+// is created in that person's name and this row records that they still have to
+// say yes. Nothing about the booking's own lifecycle depends on it: the hold on
+// the equipment is real from the moment it is reserved, so a slow reply cannot
+// let the gear be double-booked. See app/modules/big-booking-acceptance/.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum BookingAcceptanceStatus {
+  PENDING // waiting on the person the booking is for
+  ACCEPTED // they confirmed it
+  DECLINED // they turned it down
+}
+
+model BookingAcceptance {
+  id String @id @default(cuid())
+
+  /// The booking awaiting acceptance. One row per booking.
+  bookingId String @unique
+
+  organizationId String
+
+  /// The staff member who made the reservation on someone else's behalf.
+  requestedByUserId String
+
+  /// The person the booking is for — the booking's custodian at creation time.
+  /// Null when the custodian is a non-registered member (no login to respond
+  /// with); the row is then informational only and staff accept on their behalf.
+  requestedForUserId String?
+
+  status BookingAcceptanceStatus @default(PENDING)
+
+  /// Optional note the recipient leaves when declining.
+  responseNote String?
+
+  respondedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, status])
+  @@index([requestedForUserId, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BIG: Supplies (consumables & accessories)
+// Additive-only — plain FK columns, no relations added to upstream models.
+//
+// Cables, batteries, adapters, gels, media and the like are NOT assets. There
+// are eighteen identical 25ft XLR cables in a bin; nobody wants eighteen QR
+// labels, eighteen rows in the asset list, or eighteen bookings. What people
+// actually need is "add two 25ft XLR cables to this reservation".
+//
+// So a Supply is a *type* with a quantity on hand, and a BookingSupply is "this
+// booking takes N of them". Availability is quantity arithmetic across
+// overlapping bookings, not per-unit status.
+//
+// See app/modules/big-supply/.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Broad groupings used for filtering and for the usage report's breakdown.
+enum SupplyCategory {
+  CABLE
+  BATTERY
+  MEDIA // SD cards, drives, tape
+  POWER // chargers, PSUs, power strips
+  AUDIO // windshields, shock mounts, XLR adapters
+  LIGHTING // gels, diffusion, clamps
+  MOUNTING // plates, arms, clamps, tripod bits
+  ADAPTER
+  CONSUMABLE // gaff tape, batteries you don't get back
+  OTHER
+}
+
+model Supply {
+  id String @id @default(cuid())
+
+  organizationId String
+
+  /// What it is, as a person would say it out loud: "25ft XLR cable".
+  name String
+
+  description String?
+
+  category SupplyCategory @default(OTHER)
+
+  /// How many exist in total. Availability = this minus what overlapping
+  /// bookings have reserved.
+  quantityTotal Int @default(0)
+
+  /// Where they live, free text ("Cable bin 3", "Shelf B"). Deliberately not a
+  /// Location FK: supplies live in bins, not in the asset location hierarchy.
+  storageLocation String?
+
+  /// True for things that are used up and not returned (gaff tape, AA cells).
+  /// Consumables are decremented from `quantityTotal` at check-in instead of
+  /// being returned to the pool.
+  isConsumable Boolean @default(false)
+
+  /// Hidden from the picker without losing the history of past usage.
+  active Boolean @default(true)
+
+  /// The booking lines that take this supply. A relation (unlike the FKs into
+  /// upstream models) because both ends are BIG-owned, so it cannot conflict
+  /// when pulling from upstream.
+  bookingLines BookingSupply[]
+
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+  @@index([organizationId, category])
+}
+
+model BookingSupply {
+  id String @id @default(cuid())
+
+  /// Plain FK into the upstream Booking table — deliberately NOT a Prisma
+  /// relation, so `Booking` gains no BIG-only field to conflict on. Booking
+  /// windows are joined in code.
+  bookingId String
+
+  supply   Supply @relation(fields: [supplyId], references: [id], onDelete: Cascade)
+  supplyId String
+
+  organizationId String
+
+  /// How many of this supply the booking takes.
+  quantity Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One row per supply per booking — adding the same supply again bumps the
+  /// quantity rather than creating a second row.
+  @@unique([bookingId, supplyId])
+  @@index([supplyId])
+  @@index([organizationId])
+}
+
 model UserBookingNotificationPreference {
   id String @id @default(cuid())
 

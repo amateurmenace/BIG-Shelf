@@ -21,6 +21,7 @@
  */
 import type { ChangeEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { BookingStatus } from "@prisma/client";
 import { useAtom } from "jotai";
 import { PackageIcon, ScanLineIcon, Trash2Icon } from "lucide-react";
 import { DateTime } from "luxon";
@@ -46,6 +47,7 @@ import Input from "~/components/forms/input";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
+import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import { createEquipmentReservation } from "~/modules/big-equipment/service.server";
 import { requireMemberPortalAccess } from "~/modules/big-member/service.server";
@@ -111,14 +113,40 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    /**
+     * BIG: `?addTo=<bookingId>` is the "I also need equipment" path from a room
+     * booking — the order is appended to that reservation instead of becoming a
+     * second one. Scoped to the member's OWN bookings here so the form never
+     * even renders for someone else's id; the write path re-checks.
+     */
+    const addToBookingId = new URL(request.url).searchParams.get("addTo");
+    const attachTo = addToBookingId
+      ? await db.booking.findFirst({
+          where: {
+            id: addToBookingId,
+            organizationId,
+            status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
+            OR: [
+              { custodianUserId: userId },
+              { custodianTeamMemberId: selfTeamMember.id },
+            ],
+          },
+          select: { id: true, name: true, from: true, to: true },
+        })
+      : null;
+
     // Default: the next full hour clearing the org's start buffer, for 1 day.
+    // When appending to an existing reservation, its own window wins — the
+    // member is not choosing new dates, they are adding to a booked slot.
     const bufferHours = isStaff ? 0 : bookingSettings.bufferStartTime;
     const start = DateTime.now()
       .setZone(getHints(request).timeZone)
       .plus({ hours: bufferHours + 1 })
       .startOf("hour");
 
-    const header: HeaderData = { title: "Your order" };
+    const header: HeaderData = {
+      title: attachTo ? `Add to '${attachTo.name}'` : "Your order",
+    };
 
     return data(
       payload({
@@ -128,8 +156,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           name: selfTeamMember.name,
           userId: selfTeamMember.userId ?? null,
         },
-        defaultStart: toDateTimeLocalValue(start),
-        defaultEnd: toDateTimeLocalValue(start.plus({ hours: 24 })),
+        attachTo,
+        defaultStart: attachTo
+          ? toDateTimeLocalValue(
+              DateTime.fromJSDate(attachTo.from).setZone(
+                getHints(request).timeZone
+              )
+            )
+          : toDateTimeLocalValue(start),
+        defaultEnd: attachTo
+          ? toDateTimeLocalValue(
+              DateTime.fromJSDate(attachTo.to).setZone(
+                getHints(request).timeZone
+              )
+            )
+          : toDateTimeLocalValue(start.plus({ hours: 24 })),
       })
     );
   } catch (cause) {
@@ -148,6 +189,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
  * field, and a string value under that name fails ITS validation.
  */
 const AssetIdsSchema = z.object({
+  /**
+   * BIG: when present, the order is ADDED to this existing reservation instead
+   * of becoming a new one — the "I also need equipment" path from a room
+   * booking. `createEquipmentReservation` proves the booking is the member's
+   * own before writing to it.
+   */
+  attachToBookingId: z.string().min(1).optional(),
   orderAssetIds: z.string().transform((raw, ctx) => {
     try {
       const parsed = z
@@ -197,10 +245,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     const formData = await request.formData();
-    const { orderAssetIds } = parseData(formData, AssetIdsSchema, {
-      shouldBeCaptured: false,
-      additionalData: { userId, organizationId },
-    });
+    const { orderAssetIds, attachToBookingId } = parseData(
+      formData,
+      AssetIdsSchema,
+      {
+        shouldBeCaptured: false,
+        additionalData: { userId, organizationId },
+      }
+    );
     const parsed = await parseRoomBookingForm({
       request,
       formData,
@@ -216,6 +268,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       creatorId: userId,
       hints: getClientHint(request),
       isSelfServiceOrBase,
+      attachToBookingId,
     });
 
     return data(payload({ ok: true as const }));
@@ -259,7 +312,7 @@ export default function MemberOrderPage() {
 
 /** Client-only inner — the cart lives in localStorage. */
 function OrderCheckout() {
-  const { custodian, defaultStart, defaultEnd } =
+  const { custodian, defaultStart, defaultEnd, attachTo } =
     useLoaderData<typeof loader>();
   const [order, setOrder] = useAtom(equipmentOrderAtom);
   const fetcher = useFetcher<typeof action>();
@@ -404,8 +457,24 @@ function OrderCheckout() {
           </div>
         ) : null}
 
+        {attachTo ? (
+          <div className="mb-4 rounded border border-primary-200 bg-primary-25 p-3 text-sm">
+            <p className="font-medium text-gray-900">
+              Adding to &ldquo;{attachTo.name}&rdquo;
+            </p>
+            <p className="text-gray-600">
+              This equipment joins your existing reservation, so there is only
+              one thing to collect and return. The dates below are that
+              reservation&apos;s and cannot be changed here.
+            </p>
+          </div>
+        ) : null}
+
         <fetcher.Form method="post" className="flex flex-col gap-4">
           <input type="hidden" name="orderAssetIds" value={assetIdsJson} />
+          {attachTo ? (
+            <input type="hidden" name="attachToBookingId" value={attachTo.id} />
+          ) : null}
           {/* Members always book as themselves; re-validated server-side. */}
           <input
             type="hidden"

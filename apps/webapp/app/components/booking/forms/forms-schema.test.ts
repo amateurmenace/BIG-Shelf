@@ -370,7 +370,10 @@ describe("BookingFormSchema - override timezone handling", () => {
       action: "new",
       workingHours: workingHoursWith424Closed,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true, // Bypass buffer check so we isolate the override logic
+      // Working hours only bind non-admins, so these override tests run as a
+      // self-service user. `baseBookingSettings.bufferStartTime` is 0 here, so
+      // the buffer check is already out of the way.
+      isAdminOrOwner: false,
     });
 
     // Booking on 4/23 in the user's local time.
@@ -400,7 +403,7 @@ describe("BookingFormSchema - override timezone handling", () => {
       action: "new",
       workingHours: workingHoursWith424Closed,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      isAdminOrOwner: false,
     });
 
     const startDate = new Date("2099-04-24T10:00:00-05:00");
@@ -608,7 +611,9 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       action: "new",
       workingHours: enabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      // Working hours bind self-service users only — see the admin-bypass test
+      // at the bottom of this file.
+      isAdminOrOwner: false,
     });
 
     // Fixed wire strings well inside the 9–17 window in LA local. Avoiding
@@ -653,7 +658,9 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       action: "new",
       workingHours: enabledWorkingHours,
       bookingSettings: baseBookingSettings,
-      isAdminOrOwner: true,
+      // Working hours bind self-service users only — see the admin-bypass test
+      // at the bottom of this file.
+      isAdminOrOwner: false,
     });
 
     // 22:00 LA local is outside 09–17. The same wire string parsed in UTC
@@ -678,6 +685,94 @@ describe("BookingFormSchema - datetime-local wire string (1HC regression)", () =
       expect(
         errorMessages.some((msg) =>
           msg.toLowerCase().includes("must be between")
+        )
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * BIG: working hours describe when the *public* may collect and return
+ * equipment, so they gate self-service reservations only. Staff book evening
+ * shoots and weekend events, so ADMIN/OWNER must be able to pick any time.
+ */
+describe("BookingFormSchema - admins are exempt from working hours", () => {
+  const bookingSettings = {
+    bufferStartTime: 0,
+    tagsRequired: false,
+    maxBookingLength: null,
+    maxBookingLengthSkipClosedDays: false,
+  };
+
+  /** Open 09:00–17:00 every day, with 2099-04-24 closed outright. */
+  const nineToFiveWithClosedDay = {
+    enabled: true,
+    weeklySchedule: {
+      "0": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "1": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "2": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "3": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "4": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "5": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+      "6": { isOpen: true, openTime: "09:00", closeTime: "17:00" },
+    },
+    overrides: [
+      {
+        id: "override-1",
+        date: new Date("2099-04-24").toISOString(),
+        isOpen: false,
+        openTime: null,
+        closeTime: null,
+        reason: "Closed",
+      },
+    ],
+  };
+
+  const custodian = JSON.stringify({
+    id: "tm-1",
+    name: "Test User",
+    userId: "user-1",
+  });
+
+  function parseAs(
+    isAdminOrOwner: boolean,
+    startDate: string,
+    endDate: string
+  ) {
+    return BookingFormSchema({
+      hints: { timeZone: "America/New_York" } as any,
+      action: "new",
+      workingHours: nineToFiveWithClosedDay,
+      bookingSettings,
+      isAdminOrOwner,
+    }).safeParse({ name: "After hours shoot", startDate, endDate, custodian });
+  }
+
+  it("lets an admin book outside the daily open/close window", () => {
+    // 22:00–23:30 is well outside the 09:00–17:00 window.
+    expect(parseAs(true, "2099-04-23T22:00", "2099-04-23T23:30").success).toBe(
+      true
+    );
+  });
+
+  it("still blocks a self-service user outside the daily window", () => {
+    const result = parseAs(false, "2099-04-23T22:00", "2099-04-23T23:30");
+    expect(result.success).toBe(false);
+  });
+
+  it("lets an admin book on a day the org is closed", () => {
+    expect(parseAs(true, "2099-04-24T10:00", "2099-04-24T12:00").success).toBe(
+      true
+    );
+  });
+
+  it("still blocks a self-service user on a closed day", () => {
+    const result = parseAs(false, "2099-04-24T10:00", "2099-04-24T12:00");
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.errors.some((e) =>
+          e.message.toLowerCase().includes("closed")
         )
       ).toBe(true);
     }

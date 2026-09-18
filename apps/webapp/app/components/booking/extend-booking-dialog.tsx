@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import type { ReactElement } from "react";
+import { cloneElement, useCallback, useEffect, useState } from "react";
 import { CalendarIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
@@ -25,11 +26,19 @@ import {
 type ExtendBookingDialogProps = {
   className?: string;
   currentEndDate: string;
+  /**
+   * Replaces the default dropdown-styled trigger. Pass a `<Button>` when the
+   * dialog is opened from somewhere other than the Actions menu — e.g. the
+   * "Change dates" button on the booking page's action bar. The element is
+   * cloned with an `onClick` that opens the dialog.
+   */
+  trigger?: ReactElement<{ onClick: () => void }>;
 };
 
 export default function ExtendBookingDialog({
   className,
   currentEndDate,
+  trigger,
 }: ExtendBookingDialogProps) {
   const [open, setOpen] = useState(false);
   const fetcher = useFetcherWithReset<DataOrErrorResponse>();
@@ -78,15 +87,19 @@ export default function ExtendBookingDialog({
   );
   return (
     <>
-      <Button
-        type="button"
-        variant="link"
-        className="justify-start rounded px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
-        width="full"
-        onClick={handleOpen}
-      >
-        Extend booking
-      </Button>
+      {trigger ? (
+        cloneElement(trigger, { onClick: handleOpen })
+      ) : (
+        <Button
+          type="button"
+          variant="link"
+          className="justify-start rounded px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
+          width="full"
+          onClick={handleOpen}
+        >
+          Change booking dates
+        </Button>
+      )}
 
       <DialogPortal>
         <Dialog
@@ -102,9 +115,10 @@ export default function ExtendBookingDialog({
           }
         >
           <div className="px-6 pb-4">
-            <h3 className="mb-1">Extend booking</h3>
+            <h3 className="mb-1">Change the return date</h3>
             <p className="mb-4">
-              Change the end date of your booking to a date in the future.
+              Pick a new end date for this booking. Available for reservations
+              that have not been collected yet as well as bookings already out.
             </p>
 
             <fetcher.Form ref={zo.ref} method="POST">

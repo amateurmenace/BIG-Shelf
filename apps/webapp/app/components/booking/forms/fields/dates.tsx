@@ -11,6 +11,7 @@ import type {
   useWorkingHours,
   UseWorkingHoursResult,
 } from "~/hooks/use-working-hours";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { tw } from "~/utils/tw";
 
@@ -42,6 +43,15 @@ export function DatesFields({
   const { isLoading = true, error } = workingHoursData;
   const workingHoursDisabled = disabled || isLoading;
   const { maxBookingLength, bufferStartTime } = useBookingSettings();
+  /**
+   * BIG: booking-time constraints (working hours, max length, advance notice)
+   * apply to self-service reservations only — staff book at any hour. Mirror
+   * the schema's `isAdminOrOwner` bypass in the UI so admins are not shown
+   * rules that will not be enforced against them.
+   * @see BookingFormSchema in ../forms-schema.ts
+   */
+  const { isAdministratorOrOwner } = useUserRoleHelper();
+  const showTimeConstraints = !isAdministratorOrOwner;
 
   return (
     <>
@@ -130,26 +140,28 @@ export function DatesFields({
           Within this period the assets in this booking will be checked out and
           unavailable for other bookings.
         </p>
-        {(maxBookingLength || bufferStartTime > 0) && (
+        {showTimeConstraints && (maxBookingLength || bufferStartTime > 0) && (
           <Separator className="my-2" />
         )}
-        {maxBookingLength && (
+        {showTimeConstraints && maxBookingLength && (
           <p className="text-[14px] text-gray-600">
             Maximum booking length is <strong>{maxBookingLength} hours</strong>.
           </p>
         )}
-        {bufferStartTime > 0 && (
+        {showTimeConstraints && bufferStartTime > 0 && (
           <p className="text-[14px] text-gray-600">
             Minimum advance notice: <strong>{bufferStartTime} hours</strong>{" "}
             before booking start time.
           </p>
         )}
       </FormRow>
-      <WorkingHoursInfo
-        workingHoursData={workingHoursData}
-        loading={isLoading}
-      />
-      {error && (
+      {showTimeConstraints ? (
+        <WorkingHoursInfo
+          workingHoursData={workingHoursData}
+          loading={isLoading}
+        />
+      ) : null}
+      {showTimeConstraints && error && (
         <p className="mt-1 text-sm text-orange-600">
           Working hours validation unavailable: {error}
         </p>

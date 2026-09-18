@@ -39,6 +39,11 @@ import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-t
 import { CategoryBadge } from "~/components/assets/category-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import {
+  ManageBookingTabs,
+  manageBookingTabUrl,
+  type ManageBookingTab,
+} from "~/components/booking/manage-booking-tabs";
 import { StatusFilter } from "~/components/booking/status-filter";
 import styles from "~/components/booking/styles.css?url";
 import { Form } from "~/components/custom-form";
@@ -50,14 +55,8 @@ import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { LocationBadge } from "~/components/location/location-badge";
 import { Button } from "~/components/shared/button";
-import { GrayBadge } from "~/components/shared/gray-badge";
 
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "~/components/shared/tabs";
+import { Tabs, TabsContent } from "~/components/shared/tabs";
 import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 
@@ -208,8 +207,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       header: {
-        title: `Add assets for '${booking?.name}'`,
-        subHeading: "Fill up the booking with the assets of your choice",
+        // BIG: spell out how the picker behaves. "Fill up the booking with the
+        // assets of your choice" did not tell anyone that a row toggles, that
+        // what is already on the booking starts ticked, or that unticking
+        // removes it.
+        title: `Add equipment to '${booking?.name}'`,
+        subHeading:
+          "Tick an item to add it, untick to remove it. Items already on this booking are ticked. Greyed-out rows are unavailable for these dates or belong to a kit — add those from the Kits tab.",
       },
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
@@ -519,15 +523,30 @@ export default function AddAssetsToNewBooking() {
 
   const hasUnsavedChanges = selectedBulkItemsCount !== bookingAssets.length;
 
-  const manageKitsUrl = `/bookings/${
-    booking.id
-  }/overview/manage-kits?${new URLSearchParams({
+  /**
+   * The availability window the kit picker needs. Built here (rather than read
+   * from the URL) because these are the booking's own dates, not view params.
+   */
+  const bookingWindowParams = new URLSearchParams({
     // This button wouldnt be available at all if there is no booking.from and booking.to
     bookingFrom: new Date(booking.from).toISOString(),
     bookingTo: new Date(booking.to).toISOString(),
     hideUnavailable: "true",
     unhideAssetsBookigIds: booking.id,
-  })}`;
+  }).toString();
+
+  const manageKitsUrl = manageBookingTabUrl(
+    "kits",
+    booking.id,
+    bookingWindowParams
+  );
+
+  /**
+   * Where the unsaved-changes alert should go once the user confirms. Set by
+   * the tab handler so the alert can send them to whichever tab they clicked
+   * rather than always to Kits.
+   */
+  const [pendingTabUrl, setPendingTabUrl] = useState(manageKitsUrl);
 
   /**
    * Set selected items for kit based on the route data.
@@ -566,53 +585,30 @@ export default function AddAssetsToNewBooking() {
       className="flex h-full max-h-full flex-col"
       value="assets"
       activationMode="manual"
-      onValueChange={() => {
+      onValueChange={(value) => {
+        // BIG: four destinations now (Equipment / Kits / Rooms / Supplies), so
+        // the target comes from the tab rather than being the implicit "other".
+        const destination = manageBookingTabUrl(
+          value as ManageBookingTab,
+          booking.id,
+          // Kits need the same availability window params the asset picker got.
+          value === "kits" ? bookingWindowParams : undefined
+        );
         if (hasUnsavedChanges) {
+          setPendingTabUrl(destination);
           setIsAlertOpen(true);
           return;
         }
 
-        void navigate(manageKitsUrl);
+        void navigate(destination);
       }}
     >
-      <div className="border-b px-6 py-2">
-        <TabsList className="w-full">
-          <TabsTrigger
-            className="flex-1 gap-x-2"
-            value="assets"
-            aria-label={`Assets tab${
-              selectedBulkItemsCount > 0
-                ? ` (${
-                    hasSelectedAllItems ? totalItems : selectedBulkItemsCount
-                  } selected)`
-                : ""
-            }`}
-          >
-            Assets{" "}
-            {selectedBulkItemsCount > 0 ? (
-              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {hasSelectedAllItems ? totalItems : selectedBulkItemsCount}
-              </GrayBadge>
-            ) : null}
-          </TabsTrigger>
-          <TabsTrigger
-            className="flex-1 gap-x-2"
-            value="kits"
-            aria-label={`Kits tab${
-              bookingKitIds.length > 0
-                ? ` (${bookingKitIds.length} selected)`
-                : ""
-            }`}
-          >
-            Kits
-            {bookingKitIds.length > 0 ? (
-              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {bookingKitIds.length}
-              </GrayBadge>
-            ) : null}
-          </TabsTrigger>
-        </TabsList>
-      </div>
+      <ManageBookingTabs
+        counts={{
+          assets: hasSelectedAllItems ? totalItems : selectedBulkItemsCount,
+          kits: bookingKitIds.length,
+        }}
+      />
 
       <Filters
         slots={{
@@ -703,14 +699,20 @@ export default function AddAssetsToNewBooking() {
 
       {/* Footer of the modal */}
       <footer className="item-center mt-auto flex shrink-0 justify-between border-t px-6 py-3">
-        <p>
-          {hasSelectedAllItems ? totalItems : selectedBulkItemsCount} assets
-          selected
+        <p className="text-sm">
+          <span className="font-semibold text-gray-900">
+            {hasSelectedAllItems ? totalItems : selectedBulkItemsCount}
+          </span>{" "}
+          <span className="text-gray-600">
+            {(hasSelectedAllItems ? totalItems : selectedBulkItemsCount) === 1
+              ? "item will be on this booking"
+              : "items will be on this booking"}
+          </span>
         </p>
 
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
-            Close
+            Cancel
           </Button>
           <Form method="post" ref={formRef}>
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
@@ -732,7 +734,7 @@ export default function AddAssetsToNewBooking() {
               />
             ))}
             {hasUnsavedChanges && isAlertOpen ? (
-              <input name="redirectTo" value={manageKitsUrl} type="hidden" />
+              <input name="redirectTo" value={pendingTabUrl} type="hidden" />
             ) : null}
             <Button
               type="submit"
@@ -740,7 +742,7 @@ export default function AddAssetsToNewBooking() {
               value="addAssets"
               disabled={isSearching}
             >
-              Confirm
+              Save equipment list
             </Button>
           </Form>
         </div>
@@ -750,7 +752,7 @@ export default function AddAssetsToNewBooking() {
         open={isAlertOpen}
         onOpenChange={setIsAlertOpen}
         onCancel={() => {
-          void navigate(manageKitsUrl);
+          void navigate(pendingTabUrl);
         }}
         onYes={() => {
           void submit(formRef.current);

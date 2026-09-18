@@ -275,7 +275,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       isSelfServiceOrBase,
     });
 
-    await createRoomReservation({
+    const booking = await createRoomReservation({
       organizationId,
       roomId,
       ...parsed,
@@ -291,7 +291,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return redirect("/reserve?booked=1");
+    // BIG: carry the booking id so the dashboard can offer "add equipment to
+    // this booking" — gear for a room session belongs on the same reservation.
+    return redirect(`/reserve?booked=1&bookingId=${booking.id}`);
   } catch (cause) {
     if (cause instanceof Response) {
       throw cause;

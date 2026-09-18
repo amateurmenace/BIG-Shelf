@@ -147,6 +147,10 @@ export default function UserPage() {
   });
 
   const TABS: Item[] = [
+    // BIG: contact details + admin-initiated password reset.
+    ...(canManageUserNotifications
+      ? [{ to: "profile", content: "Profile" }]
+      : []),
     { to: "assets", content: "Assets" },
     { to: "bookings", content: "Bookings" },
     ...(canReadUserNotes ? [{ to: "notes", content: "Notes" }] : []),

@@ -32,6 +32,16 @@ import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import {
+  getBookingAcceptance,
+  requestBookingAcceptance,
+  respondToBookingAcceptance,
+} from "~/modules/big-booking-acceptance/service.server";
+import {
+  BOOKING_ACCEPTANCE_INTENT,
+  DeclineBookingSchema,
+} from "~/modules/big-booking-acceptance/shared";
+import { getBookingSupplies } from "~/modules/big-supply/service.server";
+import {
   primeBookingOverviewCache,
   readBookingOverviewCache,
 } from "~/modules/booking/booking-overview-client-cache";
@@ -542,6 +552,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Always use teamMembersForForm from getTeamMemberForForm - it handles all cases correctly
     const teamMembersForForm = teamMembersForFormData.teamMembers;
 
+    /**
+     * BIG: null for the overwhelming majority of bookings — it only exists when
+     * staff reserved this booking on someone else's behalf and that person has
+     * been asked to confirm it.
+     */
+    const bookingAcceptance = await getBookingAcceptance({
+      bookingId,
+      organizationId,
+    });
+
+    /** BIG: pooled supplies (cables, batteries, adapters) on this booking. */
+    const bookingSupplies = await getBookingSupplies({
+      bookingId,
+      organizationId,
+    });
+
     return data(
       payload({
         userId,
@@ -573,6 +599,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalTags: tags.length,
         partialCheckinProgress,
         partialCheckinDetails,
+        bookingAcceptance,
+        bookingSupplies,
         // Progressive checkout: segmented lifecycle bar + per-asset checkout
         // details (date/user) for the "Checked out on/by" columns.
         lifecycleProgress,
@@ -721,6 +749,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "partial-checkin",
           "partial-checkout",
           "updateNotificationRecipients",
+          // BIG: the person a booking was made FOR confirms or declines it.
+          BOOKING_ACCEPTANCE_INTENT.accept,
+          BOOKING_ACCEPTANCE_INTENT.decline,
         ]),
         nameChangeOnly: z
           .string()
@@ -751,6 +782,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       "partial-checkin": PermissionAction.checkin,
       "partial-checkout": PermissionAction.checkout,
       updateNotificationRecipients: PermissionAction.update,
+      /**
+       * BIG: `read` is the right gate here. Anyone who can open the booking may
+       * answer it, and `respondToBookingAcceptance` then enforces that the
+       * responder is the person it was actually made for — a member does not
+       * hold `booking:update` on a booking staff created for them.
+       */
+      [BOOKING_ACCEPTANCE_INTENT.accept]: PermissionAction.read,
+      [BOOKING_ACCEPTANCE_INTENT.decline]: PermissionAction.read,
     };
 
     const { organizationId, role, isSelfServiceOrBase } =
@@ -968,6 +1007,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
         });
 
+        /**
+         * BIG: when staff reserve on someone else's behalf, the booking is in
+         * that person's name — so tell them it exists and ask them to confirm.
+         * Best-effort and awaited only so the row exists before the redirect
+         * re-renders the page; it never throws.
+         */
+        await requestBookingAcceptance({
+          bookingId: id,
+          organizationId,
+          requestedByUserId: userId,
+          hints: getClientHint(request),
+        });
+
         sendNotification({
           title: "Booking reserved",
           message: "Your booking has been reserved successfully",
@@ -978,6 +1030,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return data(payload({ booking }), {
           headers,
         });
+      }
+      case BOOKING_ACCEPTANCE_INTENT.accept:
+      case BOOKING_ACCEPTANCE_INTENT.decline: {
+        const accepted = intent === BOOKING_ACCEPTANCE_INTENT.accept;
+        const { responseNote } = accepted
+          ? { responseNote: undefined }
+          : parseData(formData, DeclineBookingSchema, {
+              additionalData: { userId, id, organizationId },
+            });
+
+        await respondToBookingAcceptance({
+          bookingId: id,
+          organizationId,
+          userId,
+          accepted,
+          responseNote,
+        });
+
+        sendNotification({
+          title: accepted ? "Reservation confirmed" : "Reservation declined",
+          message: accepted
+            ? "Thanks — we've let the team know you're expecting this."
+            : "We've let the team know. They'll be in touch to release it.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ success: true });
       }
       case "checkOut": {
         const booking = await checkoutBooking({

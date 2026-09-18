@@ -33,6 +33,11 @@ import {
   upsertBookingRoomEvents,
 } from "~/modules/big-room-calendar/service.server";
 import { notifyWaitlistForFreedAssets } from "~/modules/big-waitlist/service.server";
+import {
+  DEFAULT_BOOKING_SORT_DIRECTION,
+  DEFAULT_BOOKING_SORT_FIELD,
+  resolveBookingOrderBy,
+} from "~/modules/booking/sorting";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import {
@@ -4056,6 +4061,9 @@ export async function extendBooking({
           creatorId: true,
           custodianUserId: true,
           partialCheckins: { select: { assetIds: true } },
+          // BIG: rooms are hard-conflict-checked (unlike assets, which upstream
+          // only advises on), so an extension must not silently double-book one.
+          rooms: { select: { id: true, name: true } },
         },
       })
       .catch((cause) => {
@@ -4076,8 +4084,16 @@ export async function extendBooking({
       blockBaseEntirely: true,
     });
 
-    /** Extending booking is allowed only for these status */
+    /**
+     * Extending booking is allowed only for these status.
+     *
+     * BIG: RESERVED is included so someone can push back the return date of a
+     * reservation they have not collected yet. Upstream only allowed it once
+     * the gear was in hand, which forced staff to revert the booking to DRAFT
+     * (losing the reservation, and its hold on the assets) just to move a date.
+     */
     const allowedStatus: BookingStatus[] = [
+      BookingStatus.RESERVED,
       BookingStatus.ONGOING,
       BookingStatus.OVERDUE,
     ];
@@ -4095,16 +4111,26 @@ export async function extendBooking({
       (checkin) => checkin.assetIds
     );
 
-    /** Filter to only assets that are actively checked out (not returned) */
-    const activeAssets = booking.assets.filter(
-      (asset) =>
-        (asset.status === AssetStatus.CHECKED_OUT ||
-          asset.status === AssetStatus.IN_CUSTODY) &&
-        !checkedInAssetIds.includes(asset.id)
-    );
+    /**
+     * Filter to only assets that are actively checked out (not returned).
+     *
+     * BIG: on a RESERVED booking nothing has been collected yet, so the assets
+     * are still AVAILABLE — every asset on the booking is "active" for the
+     * purposes of the conflict check below. Applying the checked-out filter to
+     * a reservation would wrongly report that everything had been returned.
+     */
+    const isPreCheckout = booking.status === BookingStatus.RESERVED;
+    const activeAssets = isPreCheckout
+      ? booking.assets
+      : booking.assets.filter(
+          (asset) =>
+            (asset.status === AssetStatus.CHECKED_OUT ||
+              asset.status === AssetStatus.IN_CUSTODY) &&
+            !checkedInAssetIds.includes(asset.id)
+        );
 
     /** Validate that there are still active assets to extend the booking for */
-    if (activeAssets.length === 0) {
+    if (!isPreCheckout && activeAssets.length === 0) {
       throw new ShelfError({
         cause: null,
         label,
@@ -4145,6 +4171,48 @@ export async function extendBooking({
           },
           shouldBeCaptured: false,
         });
+      }
+
+      /**
+       * BIG: rooms cannot be shared, so an extension that runs into another
+       * booking's room window is rejected outright — the same hard rule
+       * `createRoomReservation` enforces. Strict overlap (`from < to && to >
+       * from`) keeps back-to-back reservations legal.
+       *
+       * Duplicated rather than imported from `big-room-booking/service.server`
+       * because that module imports this one (createBooking / reserveBooking),
+       * and the cycle would break the server bundle.
+       */
+      if (booking.rooms.length > 0) {
+        const roomIds = booking.rooms.map((room) => room.id);
+        const clashingRoomBookings = await tx.booking.findMany({
+          where: {
+            id: { not: booking.id },
+            organizationId,
+            rooms: { some: { id: { in: roomIds } } },
+            status: {
+              in: [
+                BookingStatus.RESERVED,
+                BookingStatus.ONGOING,
+                BookingStatus.OVERDUE,
+              ],
+            },
+            from: { lt: newEndDate },
+            to: { gt: booking.to },
+          },
+          select: { id: true, name: true },
+        });
+
+        if (clashingRoomBookings.length > 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            message:
+              "Cannot extend booking because a room on it is already reserved during the extended period by the following bookings:",
+            additionalData: { clashingBookings: [...clashingRoomBookings] },
+            shouldBeCaptured: false,
+          });
+        }
       }
 
       return tx.booking.update({
@@ -4314,9 +4382,11 @@ export async function getBookingsFilterData({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-  const orderBy = searchParams.get("orderBy") ?? "from";
+  // BIG: default to newest-first. `from asc` used to bury a booking someone
+  // just created behind every historical one that started earlier.
+  const orderBy = searchParams.get("orderBy") ?? DEFAULT_BOOKING_SORT_FIELD;
   const orderDirection = (searchParams.get("orderDirection") ??
-    "asc") as SortingDirection;
+    DEFAULT_BOOKING_SORT_DIRECTION) as SortingDirection;
 
   /**
    * For self service and base users, we need to get the teamMember to be able to filter by it as well.
@@ -4414,8 +4484,8 @@ export async function getBookings(params: {
     userId,
     extraInclude,
     takeAll = false,
-    orderBy = "from",
-    orderDirection = "asc",
+    orderBy = DEFAULT_BOOKING_SORT_FIELD,
+    orderDirection = DEFAULT_BOOKING_SORT_DIRECTION,
     kitId,
     tags,
   } = params;
@@ -4657,7 +4727,9 @@ export async function getBookings(params: {
           },
           ...(extraInclude || undefined),
         },
-        orderBy: { [orderBy]: orderDirection },
+        // Resolved through an allowlist so an arbitrary `?orderBy=` value can
+        // never reach Prisma as a column name.
+        orderBy: resolveBookingOrderBy(orderBy, orderDirection),
       }),
       db.booking.count({ where }),
     ]);

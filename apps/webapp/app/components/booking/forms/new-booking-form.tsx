@@ -18,11 +18,11 @@ import { useHints } from "~/utils/client-hints";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
-import { CustodianField } from "./fields/custodian";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
 import { NameField } from "./fields/name";
 import { NotificationRecipientsField } from "./fields/notification-recipients";
+import { ReservedForField } from "./fields/reserved-for";
 import { BookingFormSchema, type BookingFormSchemaType } from "./forms-schema";
 import { Button } from "../../shared/button";
 import { Card } from "../../shared/card";
@@ -92,6 +92,13 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
     (m) => m.userId === custodianRef || m.id === custodianRef
   );
 
+  /**
+   * The signed-in user's own team-member row, backing the "Myself" choice.
+   * Missing only for the rare user with no TeamMember record in this
+   * workspace, in which case "Myself" is disabled and the picker is shown.
+   */
+  const ownTeamMember = teamMembersToUse?.find((m) => m.userId === userId);
+
   const userCanSeeCustodian = userCanViewSpecificCustody({
     roles,
     custodianUserId: defaultTeamMember?.user?.id,
@@ -152,9 +159,13 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                 />
               </Card>
               <Card className="field-card m-0">
-                <CustodianField
+                {/* BIG: "Custodian" became "Reserved for" — myself (the
+                    default) or someone else, who is then emailed to confirm. */}
+                <ReservedForField
+                  ownTeamMember={ownTeamMember}
                   defaultTeamMember={defaultTeamMember}
-                  disabled={disabled || isBaseOrSelfService}
+                  disabled={disabled}
+                  lockedToSelf={isBaseOrSelfService}
                   userCanSeeCustodian={userCanSeeCustodian}
                   isNewBooking={true}
                   error={

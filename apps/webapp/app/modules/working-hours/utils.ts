@@ -263,11 +263,13 @@ interface DefaultTimesResult {
  * If working hours are enabled, it checks today's schedule and overrides to determine the next available booking time.
  * Buffer time is applied from current time - the start time will be whichever is later: buffer expiry or next available working time.
  *
- * For ADMIN/OWNER users, buffer time restrictions are automatically bypassed (effective buffer = 0).
+ * For ADMIN/OWNER users, buffer time AND working-hours restrictions are
+ * automatically bypassed (effective buffer = 0, schedule ignored).
  *
  * @param workingHoursData - The working hours data containing weekly schedules and overrides.
  * @param bufferStartTime - Buffer time in hours from current time. Bypassed for admin/owner users.
- * @param isAdminOrOwner - Whether the user is an ADMIN or OWNER (bypasses buffer time restrictions).
+ * @param isAdminOrOwner - Whether the user is an ADMIN or OWNER (bypasses both
+ *   buffer time and working-hours restrictions).
  * @returns An object containing the start and end dates formatted for date input values.
  */
 export function getBookingDefaultStartEndTimes(
@@ -280,8 +282,12 @@ export function getBookingDefaultStartEndTimes(
   // Admin/Owner users bypass buffer time restrictions
   const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
 
-  // If no working hours data or working hours are disabled, use the original logic
-  if (!workingHoursData || !workingHoursData.enabled) {
+  // If no working hours data or working hours are disabled, use the original
+  // logic. BIG: admins/owners are exempt from working hours entirely (they are
+  // a self-service constraint), so their default start is simply "now" rather
+  // than being pushed forward to the next open window.
+  // @see BookingFormSchema's `isAdminOrOwner` bypass.
+  if (isAdminOrOwner || !workingHoursData || !workingHoursData.enabled) {
     return getOriginalDefaultTimes(now, effectiveBufferStartTime);
   }
 

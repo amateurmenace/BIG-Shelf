@@ -349,7 +349,10 @@ export default function AcceptInvite() {
                 name="password"
                 required
                 autoComplete="new-password"
-                placeholder="**********"
+                /* why: a "**********" placeholder is visually identical to a
+                   filled-in password field, so invitees believed a password
+                   had already been set for them and submitted nothing. */
+                placeholder="At least 8 characters"
                 inputClassName="w-full"
                 error={validationErrors?.password?.message}
               />
@@ -358,7 +361,7 @@ export default function AcceptInvite() {
                 name="confirmPassword"
                 required
                 autoComplete="new-password"
-                placeholder="**********"
+                placeholder="Re-type your password"
                 inputClassName="w-full"
                 error={validationErrors?.confirmPassword?.message}
               />

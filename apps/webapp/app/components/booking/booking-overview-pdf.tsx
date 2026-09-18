@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
-import { Fragment, useRef, useState } from "react";
+import type { ReactElement } from "react";
+import { cloneElement, Fragment, useRef, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { useFetcher } from "react-router";
 import { useReactToPrint } from "react-to-print";
@@ -23,6 +24,7 @@ type PdfApiResponse = { pdfMeta: PdfDbResult };
 export const BookingOverviewPDF = ({
   booking,
   timeStamp,
+  trigger,
 }: {
   booking: {
     id: Booking["id"];
@@ -30,6 +32,12 @@ export const BookingOverviewPDF = ({
     assets: Partial<Asset>[];
   };
   timeStamp: number;
+  /**
+   * Replaces the two default dropdown-item triggers with a single element of
+   * your own — used by the booking page's "Print" button. The element is cloned
+   * with an `onClick` that opens the preview dialog.
+   */
+  trigger?: ReactElement<{ onClick: () => void }>;
 }) => {
   const totalAssets = booking.assets.length;
   const componentRef = useRef<HTMLDivElement>(null);
@@ -68,17 +76,21 @@ export const BookingOverviewPDF = ({
 
   return (
     <>
-      <Button
-        type="button"
-        variant="link"
-        className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
-        width="full"
-        name="generate pdf"
-        onClick={handleOpenDialog}
-        disabled={disabled}
-      >
-        Generate overview PDF
-      </Button>
+      {trigger ? (
+        cloneElement(trigger, { onClick: handleOpenDialog })
+      ) : (
+        <Button
+          type="button"
+          variant="link"
+          className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
+          width="full"
+          name="generate pdf"
+          onClick={handleOpenDialog}
+          disabled={disabled}
+        >
+          Generate overview PDF
+        </Button>
+      )}
       <DialogPortal>
         <Dialog
           open={isDialogOpen}
@@ -88,7 +100,8 @@ export const BookingOverviewPDF = ({
             <div className="mx-auto w-full max-w-[210mm] border p-4 text-center">
               <h3>Generate booking checklist for "{booking?.name}"</h3>
               <p>
-                You can either preview or download the PDF. Assets are sorted by{" "}
+                Preview below, then print it or save it as a PDF. Assets are
+                sorted by{" "}
                 {BOOKING_ASSET_SORTING_OPTIONS[
                   orderBy as keyof typeof BOOKING_ASSET_SORTING_OPTIONS
                 ] || BOOKING_ASSET_SORTING_OPTIONS.status}{" "}
@@ -96,8 +109,8 @@ export const BookingOverviewPDF = ({
               </p>
               {!isFetchingBookings && (
                 <div className="mt-4">
-                  <Button type="button" onClick={handlePrint}>
-                    Download PDF
+                  <Button type="button" onClick={handlePrint} icon="print">
+                    Print / Save as PDF
                   </Button>
                 </div>
               )}
@@ -135,18 +148,21 @@ export const BookingOverviewPDF = ({
         </Dialog>
       </DialogPortal>
 
-      {/* Only for mobile */}
-      <Button
-        type="button"
-        variant="link"
-        className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
-        width="full"
-        name="generate pdf"
-        disabled={disabled}
-        onClick={handleOpenDialog}
-      >
-        Generate overview PDF
-      </Button>
+      {/* Only for mobile — suppressed when the caller supplies its own trigger,
+          which is already responsive. */}
+      {trigger ? null : (
+        <Button
+          type="button"
+          variant="link"
+          className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
+          width="full"
+          name="generate pdf"
+          disabled={disabled}
+          onClick={handleOpenDialog}
+        >
+          Generate overview PDF
+        </Button>
+      )}
     </>
   );
 };
@@ -239,7 +255,9 @@ const BookingPDFPreview = ({
             <span className="grow text-gray-600">{booking?.name}</span>
           </div>
           <div className="flex border-b border-gray-300 p-2">
-            <span className="min-w-[150px] text-sm font-medium">Custodian</span>
+            <span className="min-w-[150px] text-sm font-medium">
+              Reserved for
+            </span>
             <span className="grow text-gray-600">{custodianName}</span>
           </div>
           <div className="flex border-b border-gray-300 p-2">

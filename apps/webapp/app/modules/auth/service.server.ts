@@ -6,6 +6,7 @@ import {
 import type { AuthSession } from "@server/session";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import { sendPasswordResetOtpEmail } from "~/emails/big/password-reset-otp";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
@@ -351,16 +352,84 @@ export async function sendOTP(email: string) {
   }
 }
 
-export async function sendResetPasswordLink(email: string) {
+/**
+ * Sends a password-reset one-time code.
+ *
+ * BIG: this used to call `auth.resetPasswordForEmail`, which asks **Supabase**
+ * to send the email over ITS own SMTP settings. When those are not configured,
+ * Supabase silently falls back to its built-in sender — heavily rate-limited,
+ * and in many projects restricted to project members — so ordinary members
+ * requested a reset and received nothing at all, with no error raised anywhere.
+ *
+ * Instead we generate the recovery code WITHOUT sending
+ * (`auth.admin.generateLink` does not email) and deliver it ourselves over the
+ * workspace's own SMTP — the transport that already carries invites and booking
+ * notifications, and which is therefore known to work.
+ *
+ * The verification half of the flow is unchanged: the code is a standard
+ * Supabase recovery OTP and is still redeemed with
+ * `verifyOtp({ type: "recovery" })`.
+ *
+ * @param email - Who asked for the reset.
+ * @param options.initiatedByAdmin - True when a workspace admin started this on
+ *   the user's behalf; the email says so, since an unexpected code otherwise
+ *   looks like an attack.
+ * @param options.adminName - Display name of that admin.
+ * @throws {ShelfError} When the user is SSO-managed, or when the code could not
+ *   be generated or sent.
+ */
+export async function sendResetPasswordLink(
+  email: string,
+  options?: { initiatedByAdmin?: boolean; adminName?: string | null }
+) {
   try {
     await validateNonSSOUser(email);
 
-    await getSupabaseAdmin().auth.resetPasswordForEmail(email);
+    const { data, error: generateError } =
+      await getSupabaseAdmin().auth.admin.generateLink({
+        type: "recovery",
+        email,
+      });
+
+    if (generateError) {
+      throw generateError;
+    }
+
+    const otp = data?.properties?.email_otp;
+
+    if (!otp) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "We couldn't generate a reset code for that account. Please contact support.",
+        additionalData: { email },
+        label,
+      });
+    }
+
+    const user = await db.user
+      .findFirst({
+        where: { email },
+        select: { firstName: true, displayName: true },
+      })
+      .catch(() => null);
+
+    await sendPasswordResetOtpEmail({
+      email,
+      otp,
+      firstName: user?.firstName || user?.displayName,
+      initiatedByAdmin: options?.initiatedByAdmin,
+      adminName: options?.adminName,
+    });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while sending the reset password link. Please try again later or contact support.",
+        "Something went wrong while sending the reset password code. Please try again later or contact support.",
       additionalData: { email },
       label,
     });

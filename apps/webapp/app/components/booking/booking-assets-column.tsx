@@ -211,9 +211,9 @@ export function BookingAssetsColumn() {
                 className="py-10"
                 customContent={{
                   title: "Start by defining a booking period",
-                  text: "Assets added to your booking will show up here. Scan tags or search for assets to add to your booking.",
+                  text: "Nothing has been added yet. Use \u201cAdd equipment\u201d to browse the catalog, \u201cScan to add\u201d to scan labels, or \u201cAdd a room\u201d to reserve a space \u2014 all three add to this same booking.",
                   newButtonRoute: manageAssetsUrl,
-                  newButtonContent: "Add assets",
+                  newButtonContent: "Add equipment",
                   buttonProps: {
                     disabled: manageAssetsButtonDisabled,
                   },
@@ -377,7 +377,7 @@ function BookingAssetsHeader({
     return (
       <div className="flex justify-between">
         <ListTitle
-          title={"Assets & Kits"}
+          title={"Equipment in this booking"}
           titleClassName="text-transform normal-case"
           hasBulkActions
           itemsGetter={itemsGetter}
@@ -387,11 +387,15 @@ function BookingAssetsHeader({
         <When truthy={canSeeActions}>
           <div className="flex items-center gap-2">
             <ListBulkActionsDropdown />
+            {/* BIG: the three "add" routes are spelled out — "Add assets" used
+                to be the only labelled one, so people did not realise scanning
+                and rooms added to the same booking. */}
             <Button
               icon="scan"
               variant="secondary"
               to="scan-assets"
               disabled={manageAssetsButtonDisabled}
+              tooltip="Scan QR codes or barcodes to add equipment"
             >
               Scan to add
             </Button>
@@ -403,15 +407,18 @@ function BookingAssetsHeader({
               variant="secondary"
               className="whitespace-nowrap"
               disabled={manageAssetsButtonDisabled}
+              tooltip="Reserve a room as part of this booking"
             >
-              Add rooms
+              Add a room
             </Button>
             <Button
               to={manageAssetsUrl}
+              icon="plus"
               className="whitespace-nowrap"
               disabled={manageAssetsButtonDisabled}
+              tooltip="Browse the equipment catalog and pick items"
             >
-              Add assets
+              Add equipment
             </Button>
           </div>
         </When>
@@ -425,7 +432,7 @@ function BookingAssetsHeader({
       {/* First row: ListTitle and ListBulkActionsDropdown */}
       <div className="flex items-start justify-between">
         <ListTitle
-          title="Assets & Kits"
+          title="Equipment in this booking"
           hasBulkActions
           itemsGetter={itemsGetter}
           disableSelectAllItems
@@ -455,14 +462,15 @@ function BookingAssetsHeader({
             className="flex-1 whitespace-nowrap"
             disabled={manageAssetsButtonDisabled}
           >
-            Add rooms
+            Room
           </Button>
           <Button
             to={manageAssetsUrl}
+            icon="plus"
             className="flex-1 whitespace-nowrap"
             disabled={manageAssetsButtonDisabled}
           >
-            Add assets
+            Equipment
           </Button>
         </div>
       </When>

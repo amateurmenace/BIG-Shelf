@@ -6,7 +6,6 @@ import {
   BoxesIcon,
   CalendarRangeIcon,
   ChartLineIcon,
-  ClipboardCheckIcon,
   DoorOpenIcon,
   FileBarChartIcon,
   HomeIcon,
@@ -18,6 +17,7 @@ import {
   ScanBarcodeIcon,
   SettingsIcon,
   TagsIcon,
+  UndoDotIcon,
   UsersRoundIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -190,12 +190,6 @@ export function useSidebarNavItems() {
       hidden: isBaseOrSelfService,
     },
     {
-      type: "child",
-      title: "Audits",
-      to: "/audits",
-      Icon: ClipboardCheckIcon,
-    },
-    {
       type: "parent",
       title: "Bookings",
       Icon: CalendarRangeIcon,
@@ -290,6 +284,18 @@ export function useSidebarNavItems() {
           title: "Custom fields",
           to: "/settings/custom-fields",
         },
+        {
+          // BIG: pooled consumables & accessories (cables, batteries, …).
+          title: "Supplies",
+          to: "/settings/supplies",
+        },
+        {
+          // BIG: audits moved out of the top-level nav — they are an
+          // occasional administrative chore, not a daily surface, so they live
+          // with the other workspace-level settings.
+          title: "Audits",
+          to: "/audits",
+        },
       ],
     },
   ];
@@ -307,6 +313,15 @@ export function useSidebarNavItems() {
       title: "QR Scanner",
       to: "/scanner",
       Icon: ScanBarcodeIcon,
+    },
+    {
+      // BIG: the returns desk — scan gear back in and photograph any damage
+      // before it goes on the shelf. Members never see it.
+      type: "child",
+      title: "Check in",
+      to: "/check-in",
+      Icon: UndoDotIcon,
+      hidden: isBaseOrSelfService || isMember,
     },
     {
       type: "button",

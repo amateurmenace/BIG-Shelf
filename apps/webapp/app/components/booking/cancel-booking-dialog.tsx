@@ -75,7 +75,7 @@ export function CancelBookingDialog({ bookingName }: CancelBookingDialogProps) {
               rows={3}
               maxLength={500}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-primary-500 focus:ring-primary-500"
-              placeholder="Let the custodian know why this booking was cancelled..."
+              placeholder="Let the person it was reserved for know why this booking was cancelled..."
               disabled={disabled}
               aria-describedby="cancellationReason-description"
             />

@@ -3,6 +3,11 @@ import { ChevronRight } from "lucide-react";
 import { useMatches } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import {
+  BOOKING_SORTING_OPTIONS,
+  DEFAULT_BOOKING_SORT_DIRECTION,
+  DEFAULT_BOOKING_SORT_FIELD,
+} from "~/modules/booking/sorting";
 import type { RouteHandleWithName } from "~/modules/types";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -12,12 +17,6 @@ import DynamicDropdown from "../dynamic-dropdown/dynamic-dropdown";
 import { Filters } from "../list/filters";
 import { SortBy } from "../list/filters/sort-by";
 import When from "../when/when";
-
-const BOOKING_SORTING_OPTIONS = {
-  from: "From Date",
-  to: "To Date",
-  name: "Name",
-} as const;
 
 type BookingFiltersProps = {
   className?: string;
@@ -54,8 +53,8 @@ export default function BookingFilters({
         "right-of-search": hideSortBy ? null : (
           <SortBy
             sortingOptions={BOOKING_SORTING_OPTIONS}
-            defaultSortingBy="from"
-            defaultSortingDirection="asc"
+            defaultSortingBy={DEFAULT_BOOKING_SORT_FIELD}
+            defaultSortingDirection={DEFAULT_BOOKING_SORT_DIRECTION}
           />
         ),
       }}
@@ -64,7 +63,8 @@ export default function BookingFilters({
         <DynamicDropdown
           trigger={
             <div className="my-2 flex cursor-pointer items-center gap-2 md:my-0">
-              Custodian <ChevronRight className="hidden rotate-90 md:inline" />
+              Reserved for{" "}
+              <ChevronRight className="hidden rotate-90 md:inline" />
             </div>
           }
           model={{
@@ -73,7 +73,7 @@ export default function BookingFilters({
             deletedAt: null,
           }}
           renderItem={(item) => resolveTeamMemberName(item, true)}
-          label="Filter by custodian"
+          label="Filter by who it is reserved for"
           placeholder="Search team members"
           initialDataKey="teamMembers"
           countKey="totalTeamMembers"

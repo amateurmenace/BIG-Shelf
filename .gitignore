@@ -83,3 +83,7 @@ node-compile-cache/
 
 # Expo build/cache artifacts (root-level; apps/companion/.gitignore covers its own)
 .expo/
+
+# BIG: local data snapshots (asset title backups, rename plans). Real workspace
+# data — kept on disk for restores, never committed.
+.big-data/
