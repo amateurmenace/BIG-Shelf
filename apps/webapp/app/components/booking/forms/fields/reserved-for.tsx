@@ -175,12 +175,19 @@ export function ReservedForField({
               name: "teamMember",
               queryKey: "name",
               deletedAt: null,
+              /**
+               * BIG: search the whole Neon membership, not just people who
+               * have a Shelf record. Most members have never logged in, so
+               * without this the picker offers staff and almost nobody else.
+               * @see ~/modules/big-member-directory/service.server.ts
+               */
+              includeDirectory: true,
             }}
             fieldName="custodian"
             contentLabel="Team members"
             initialDataKey="teamMembersForForm"
             countKey="totalTeamMembers"
-            placeholder="Search for a member"
+            placeholder="Search members by name or email"
             allowClear
             closeOnSelect
             transformItem={(item: ModelFilterItem & { userId?: string }) => ({
@@ -193,15 +200,30 @@ export function ReservedForField({
                 userId: item?.userId,
               }),
             })}
-            renderItem={(item) =>
-              userCanSeeCustodian || isNewBooking
-                ? resolveTeamMemberName(item, true)
-                : "Private"
-            }
+            renderItem={(item) => {
+              if (!userCanSeeCustodian && !isNewBooking) return "Private";
+
+              const email = (item as { metadata?: { email?: string } })
+                ?.metadata?.email;
+
+              return (
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate">
+                    {resolveTeamMemberName(item, true)}
+                  </span>
+                  {email ? (
+                    <span className="truncate text-xs text-gray-500">
+                      {email}
+                    </span>
+                  ) : null}
+                </span>
+              );
+            }}
           />
           <p className="mt-2 text-[14px] text-gray-600">
-            The reservation will be in their name and they will be emailed to
-            confirm it. The equipment is held for them straight away.
+            Search any BIG member by name or email — they do not need to have
+            logged in before. The reservation goes in their name and they are
+            emailed to confirm it; the equipment is held for them straight away.
           </p>
         </>
       )}

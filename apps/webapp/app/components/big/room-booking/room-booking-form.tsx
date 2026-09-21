@@ -25,6 +25,7 @@
 import type { ChangeEvent } from "react";
 import { useMemo, useState } from "react";
 import { Form, useActionData } from "react-router";
+import { MemberPicker } from "~/components/big/member-picker";
 import type { BookingFormSchemaType } from "~/components/booking/forms/forms-schema";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -33,7 +34,6 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { useHints } from "~/utils/client-hints";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
-import { tw } from "~/utils/tw";
 import type { ClientBusyWindow } from "./schedule";
 import {
   overlapsAnyWindow,
@@ -265,51 +265,23 @@ export function RoomBookingForm({
           value={JSON.stringify(custodian.value)}
         />
       ) : (
-        <div>
-          <label
-            htmlFor="room-booking-custodian"
-            className="mb-[6px] block text-sm font-medium text-gray-700"
-          >
-            Reserve for
-          </label>
-          <select
-            id="room-booking-custodian"
-            name="custodian"
-            required
-            defaultValue={
-              custodian.defaultId
-                ? JSON.stringify(
-                    custodian.options.find(
-                      (option) => option.id === custodian.defaultId
-                    ) ?? custodian.options[0]
-                  )
-                : undefined
-            }
-            className={tw(
-              "w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900",
-              "focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-            )}
-            aria-describedby={
-              validationErrors?.custodian?.message
-                ? "room-booking-custodian-error"
-                : undefined
-            }
-          >
-            {custodian.options.map((option) => (
-              <option key={option.id} value={JSON.stringify(option)}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          {validationErrors?.custodian?.message ? (
-            <p
-              id="room-booking-custodian-error"
-              className="mt-1 text-sm text-error-500"
-            >
-              {validationErrors.custodian.message}
-            </p>
-          ) : null}
-        </div>
+        /* BIG: a searchable picker over the WHOLE membership. This was a
+           plain <select> listing only people with a Shelf record, which for
+           BIG meant staff and almost no members — the ~113 people in the Neon
+           directory were unreachable, so staff could not book a room for the
+           members the room is for. */
+        <MemberPicker
+          defaultValue={
+            custodian.defaultId
+              ? custodian.options.find(
+                  (option) => option.id === custodian.defaultId
+                ) ?? null
+              : null
+          }
+          disabled={disabled}
+          error={validationErrors?.custodian?.message}
+          hint="Search any BIG member by name or email — they do not need to have logged in before."
+        />
       )}
 
       <Button type="submit" disabled={disabled} className="w-full sm:w-auto">

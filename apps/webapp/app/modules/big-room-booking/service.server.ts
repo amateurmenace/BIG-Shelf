@@ -24,6 +24,7 @@ import { BookingStatus } from "@prisma/client";
 import { DateTime } from "luxon";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
 import { db } from "~/database/db.server";
+import { resolveReservationCustodian } from "~/modules/big-member-directory/service.server";
 import {
   createBooking,
   deleteBooking,
@@ -31,7 +32,6 @@ import {
   updateBookingRooms,
 } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import type { ClientHint } from "~/utils/client-hints";
 import { getHints } from "~/utils/client-hints";
@@ -484,20 +484,17 @@ export async function parseRoomBookingForm({
     });
   }
 
-  // Prove the custodian belongs to this org (the id is client input).
-  const custodianFromDb = await getTeamMember({
-    id: custodian.id,
+  /**
+   * Prove the custodian belongs to this org (the id is client input).
+   *
+   * BIG: the staff room-booking form's picker also offers members who exist
+   * only in the Neon directory, so this resolves such a pick into a real
+   * TeamMember record. For an ordinary id it is a plain org-scoped lookup.
+   * @see ~/modules/big-member-directory/service.server.ts
+   */
+  const custodianFromDb = await resolveReservationCustodian({
     organizationId,
-    select: { id: true, userId: true },
-  }).catch((cause) => {
-    throw new ShelfError({
-      cause,
-      title: "Team member not found",
-      message: "The selected team member could not be found.",
-      additionalData: { userId, custodian },
-      label,
-      status: 404,
-    });
+    custodianId: custodian.id,
   });
 
   // Restricted roles book for themselves only.

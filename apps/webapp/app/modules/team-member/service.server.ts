@@ -12,6 +12,15 @@ import { resolveUserDisplayName } from "~/utils/user";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
+
+/**
+ * How many team members a picker loads before the user has typed anything.
+ *
+ * BIG: raised from 12. With 18 team members, a 12-row first page silently hid
+ * a third of the workspace — and because the query had no `orderBy`, WHICH
+ * third was down to physical row order. Paired with the `orderBy` added below.
+ */
+const TEAM_MEMBER_PICKER_PAGE_SIZE = 50;
 type TeamMemberWithUserData = Prisma.TeamMemberGetPayload<{
   include: {
     user: {
@@ -286,7 +295,26 @@ export async function getTeamMemberForCustodianFilter({
               },
             },
           },
-          take: getAll ? undefined : 12,
+          /**
+           * BIG: this query had NO `orderBy`, so the `take` below sliced an
+           * arbitrary 12 rows out of the workspace and the in-memory sort
+           * further down only reordered whatever survived. In practice that
+           * hid real people from every custodian / "Reserved for" picker —
+           * with 18 team members, three of BIG's six members never appeared,
+           * and which three was down to physical row order.
+           *
+           * Ordering here (rather than only after the slice) makes the first
+           * page deterministic and puts registered users ahead of
+           * non-registered members, so placeholder NRM rows cannot consume
+           * slots that real accounts need. `nulls: "last"` is required:
+           * Postgres sorts NULLs FIRST on DESC, which would put every NRM at
+           * the top — the exact opposite of the intent.
+           */
+          orderBy: [
+            { userId: { sort: "desc", nulls: "last" } },
+            { name: "asc" },
+          ],
+          take: getAll ? undefined : TEAM_MEMBER_PICKER_PAGE_SIZE,
         }),
         db.teamMember.findMany({
           where: { organizationId, id: { in: selectedTeamMembers } },

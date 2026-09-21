@@ -14,6 +14,7 @@ import { newBookingHeader } from "~/components/booking/new-booking-header";
 import Header from "~/components/layout/header";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useUserData } from "~/hooks/use-user-data";
+import { resolveReservationCustodian } from "~/modules/big-member-directory/service.server";
 import {
   createBooking,
   updateBookingNotificationRecipients,
@@ -25,7 +26,6 @@ import {
   getTagsForBookingTagsFilter,
 } from "~/modules/tag/service.server";
 import {
-  getTeamMember,
   getTeamMemberForForm,
   getTeamMembersForNotify,
 } from "~/modules/team-member/service.server";
@@ -193,20 +193,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
       tags: commaSeparatedTags,
     } = payload;
 
-    // Validate that the custodian belongs to the same organization
-    const custodianFromDb = await getTeamMember({
-      id: custodian.id,
+    /**
+     * Resolve the person this booking is for, and prove they belong to this
+     * organization.
+     *
+     * BIG: the picker can also offer members who exist only in the Neon
+     * directory and have no Shelf record yet. `resolveReservationCustodian`
+     * creates that record here, at the moment it is actually needed, and is a
+     * plain org-scoped lookup for an ordinary team member id.
+     * @see ~/modules/big-member-directory/service.server.ts
+     */
+    const custodianFromDb = await resolveReservationCustodian({
       organizationId,
-      select: { id: true, userId: true },
-    }).catch((cause) => {
-      throw new ShelfError({
-        cause,
-        title: "Team member not found",
-        message: "The selected team member could not be found.",
-        additionalData: { userId, custodian },
-        label: "Booking",
-        status: 404,
-      });
+      custodianId: custodian.id,
     });
 
     /**
@@ -243,8 +242,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       booking: {
         from,
         to,
-        custodianTeamMemberId: custodian.id,
-        custodianUserId: custodian?.userId ?? null,
+        custodianTeamMemberId: custodianFromDb.id,
+        custodianUserId: custodianFromDb.userId ?? null,
         name: name!,
         description: description ?? null,
         organizationId,

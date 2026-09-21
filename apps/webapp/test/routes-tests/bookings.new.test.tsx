@@ -2,6 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ShelfError } from "~/utils/error";
 
 import { action } from "~/routes/_layout+/bookings.new";
 import { requirePermission } from "~/utils/roles.server";
@@ -14,8 +15,8 @@ const dbMocks = vi.hoisted(() => {
   };
 });
 
-const teamMemberServiceMocks = vi.hoisted(() => ({
-  getTeamMember: vi.fn(),
+const memberDirectoryMocks = vi.hoisted(() => ({
+  resolveReservationCustodian: vi.fn(),
 }));
 
 // why: testing route handler without executing actual database operations
@@ -41,9 +42,11 @@ vi.mock("~/modules/booking/service.server", () => ({
   }),
 }));
 
-// why: testing custodian organization validation without database lookups
-vi.mock("~/modules/team-member/service.server", () => ({
-  getTeamMember: teamMemberServiceMocks.getTeamMember,
+// why: testing custodian organization validation without database lookups.
+// The route resolves the custodian via the member directory, which org-scopes
+// an ordinary team member id and additionally materialises a Neon-only member.
+vi.mock("~/modules/big-member-directory/service.server", () => ({
+  resolveReservationCustodian: memberDirectoryMocks.resolveReservationCustodian,
 }));
 
 // why: testing booking creation without executing tag building logic
@@ -118,7 +121,7 @@ vi.mock("react-router", async () => {
 });
 
 const requirePermissionMock = vi.mocked(requirePermission);
-const mockGetTeamMember = teamMemberServiceMocks.getTeamMember;
+const mockResolveCustodian = memberDirectoryMocks.resolveReservationCustodian;
 const mockBookingCreate = dbMocks.booking.create;
 
 function createActionArgs(
@@ -138,7 +141,7 @@ function createActionArgs(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGetTeamMember.mockReset();
+  mockResolveCustodian.mockReset();
   mockBookingCreate.mockReset();
   requirePermissionMock.mockReset();
 });
@@ -152,7 +155,16 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Custodian not found due to org filter
-    mockGetTeamMember.mockRejectedValue(new Error("Not found"));
+    // The directory throws a 404 ShelfError for an id outside the caller's
+    // organization; the route surfaces it rather than wrapping it.
+    mockResolveCustodian.mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "Member not found",
+        label: "Team Member",
+        status: 404,
+      })
+    );
 
     const formData = new FormData();
     formData.set("name", "Test Booking");
@@ -175,10 +187,9 @@ describe("bookings/new - custodian assignment", () => {
 
     expect((response as Response).status).toBe(404);
 
-    expect(mockGetTeamMember).toHaveBeenCalledWith({
-      id: "foreign-team-member-123",
+    expect(mockResolveCustodian).toHaveBeenCalledWith({
+      custodianId: "foreign-team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
     });
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
@@ -192,7 +203,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Valid team member from same org
-    mockGetTeamMember.mockResolvedValue({
+    mockResolveCustodian.mockResolvedValue({
       id: "team-member-123",
       userId: "user-456",
     });
@@ -218,10 +229,9 @@ describe("bookings/new - custodian assignment", () => {
 
     expect((response as Response).status).toBe(302); // Redirect on success
 
-    expect(mockGetTeamMember).toHaveBeenCalledWith({
-      id: "team-member-123",
+    expect(mockResolveCustodian).toHaveBeenCalledWith({
+      custodianId: "team-member-123",
       organizationId: "org-1",
-      select: { id: true, userId: true },
     });
   });
 
@@ -232,7 +242,7 @@ describe("bookings/new - custodian assignment", () => {
       isSelfServiceOrBase: false,
     } as any);
 
-    mockGetTeamMember.mockResolvedValue({
+    mockResolveCustodian.mockResolvedValue({
       id: "team-member-123",
       userId: "user-456",
     });
@@ -271,7 +281,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Valid team member from same org, but different user
-    mockGetTeamMember.mockResolvedValue({
+    mockResolveCustodian.mockResolvedValue({
       id: "team-member-456",
       userId: "other-user-456", // Different from current user
     });
@@ -308,7 +318,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Valid team member from same org, same user
-    mockGetTeamMember.mockResolvedValue({
+    mockResolveCustodian.mockResolvedValue({
       id: "team-member-123",
       userId: "user-123", // Same as current user
     });
@@ -343,7 +353,7 @@ describe("bookings/new - custodian assignment", () => {
     } as any);
 
     // Valid team member from same org, but different user (should fail for BASE role)
-    mockGetTeamMember.mockResolvedValue({
+    mockResolveCustodian.mockResolvedValue({
       id: "team-member-456",
       userId: "other-user-456", // Different from current user
     });

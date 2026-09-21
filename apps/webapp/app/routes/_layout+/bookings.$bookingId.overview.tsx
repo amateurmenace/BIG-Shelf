@@ -40,6 +40,7 @@ import {
   BOOKING_ACCEPTANCE_INTENT,
   DeclineBookingSchema,
 } from "~/modules/big-booking-acceptance/shared";
+import { resolveReservationCustodian } from "~/modules/big-member-directory/service.server";
 import { getBookingSupplies } from "~/modules/big-supply/service.server";
 import {
   primeBookingOverviewCache,
@@ -933,6 +934,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const tags = buildTagsSet(parsedData.tags).set;
 
+        /**
+         * BIG: the picker can offer a member who exists only in the Neon
+         * directory; this creates their Shelf record on first use. Also
+         * org-scopes an ordinary team member id before it is written.
+         * @see ~/modules/big-member-directory/service.server.ts
+         */
+        const savedCustodian = parsedData.custodian
+          ? await resolveReservationCustodian({
+              organizationId,
+              custodianId: parsedData.custodian.id,
+            })
+          : null;
+
         const booking = await updateBasicBooking({
           id,
           organizationId,
@@ -940,8 +954,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: parsedData.custodian?.userId,
-          custodianTeamMemberId: parsedData.custodian?.id,
+          custodianUserId: savedCustodian?.userId ?? undefined,
+          custodianTeamMemberId: savedCustodian?.id,
           tags,
           userId,
           hints: getClientHint(request),
@@ -992,6 +1006,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             }).toJSDate()
           : undefined;
 
+        // BIG: same directory resolution as the save path above.
+        const reservedFor = parsedData.custodian
+          ? await resolveReservationCustodian({
+              organizationId,
+              custodianId: parsedData.custodian.id,
+            })
+          : null;
+
         const booking = await reserveBooking({
           id,
           organizationId,
@@ -999,8 +1021,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           description: parsedData.description,
           from: formattedFrom,
           to: formattedTo,
-          custodianUserId: parsedData.custodian?.userId,
-          custodianTeamMemberId: parsedData.custodian?.id,
+          custodianUserId: reservedFor?.userId ?? undefined,
+          custodianTeamMemberId: reservedFor?.id,
           hints: getClientHint(request),
           isSelfServiceOrBase,
           tags,
