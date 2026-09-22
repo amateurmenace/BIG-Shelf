@@ -446,6 +446,62 @@ export async function isMemberReservationEligible({
 }
 
 /**
+ * Membership check for someone with NO account — the kiosk walk-up case.
+ *
+ * {@link isMemberReservationEligible} starts from an account: a role, an
+ * exemption flag, an email. A paid-up Neon member who has never signed in has
+ * none of those. Their row in the synced directory is the only evidence of who
+ * they are — and it is what their account-less record gets built from. So this
+ * asks the directory, and only when they are not in it asks Neon live (a hit
+ * self-heals the row, exactly as at signup).
+ *
+ * Deliberately NOT fail-open like the account gate. With no account and no
+ * directory row there is nobody to book for, and failing open would mean
+ * booking rooms in the name of any string typed into a public wall. It fails
+ * SOFT instead: an unreachable Neon is reported as "couldn't check", never as
+ * "not a member", so a paying member is told to ask staff — not to buy a
+ * membership they already have.
+ *
+ * @param email - The email typed at the kiosk
+ * @returns Their directory row when they are an active member; `null` when
+ *   Neon confirms they are not one
+ * @throws {ShelfError} 503 when membership can't be determined right now
+ *   (Neon unreachable or unconfigured, and they were not in the last sync)
+ */
+export async function findActiveMemberWithoutAccount(
+  email: string
+): Promise<NeonAllowlistMember | null> {
+  const listed = await findNeonAllowlistMemberByEmail(email);
+  if (listed) {
+    return listed;
+  }
+
+  try {
+    // Throws when Neon is unconfigured or unreachable; null means "not active".
+    return await refreshAllowlistMemberFromNeon(email);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Could not verify Neon membership for a kiosk walk-up with no account; asked them to see staff.",
+        additionalData: { email },
+        label,
+      })
+    );
+    throw new ShelfError({
+      cause: null,
+      title: "Couldn't check membership",
+      message:
+        "We couldn't confirm your membership just now. Please ask a member of staff to book this for you.",
+      status: 503,
+      shouldBeCaptured: false,
+      label,
+    });
+  }
+}
+
+/**
  * Reservation gate. A MEMBER may reserve only when
  * {@link isMemberReservationEligible} is true; non-MEMBER roles (staff) are
  * never gated here.

@@ -43,6 +43,7 @@ import { findUserByEmail } from "~/modules/user/service.server";
 import {
   assertActiveNeonMemberForOtp,
   assertMemberCanReserve,
+  findActiveMemberWithoutAccount,
   isMemberReservationEligible,
 } from "./service.server";
 
@@ -271,5 +272,60 @@ describe("assertActiveNeonMemberForOtp — `mode` is not to be trusted", () => {
       assertActiveNeonMemberForOtp("anyone@example.com")
     ).resolves.toBeUndefined();
     expect(findUserByEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("findActiveMemberWithoutAccount (kiosk walk-up, no account)", () => {
+  const ROW = {
+    id: "row-1",
+    email: "ava@example.com",
+    firstName: "Ava",
+    lastName: "Whitfield",
+    neonAccountId: "9001",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("finds a paid-up member in the synced directory without asking Neon", async () => {
+    mf(findNeonAllowlistMemberByEmail).mockResolvedValue(ROW);
+
+    await expect(
+      findActiveMemberWithoutAccount("ava@example.com")
+    ).resolves.toEqual(ROW);
+    expect(refreshAllowlistMemberFromNeon).not.toHaveBeenCalled();
+  });
+
+  it("asks Neon live before refusing someone missing from the last sync", async () => {
+    mf(findNeonAllowlistMemberByEmail).mockResolvedValue(null);
+    mf(refreshAllowlistMemberFromNeon).mockResolvedValue(ROW);
+
+    await expect(
+      findActiveMemberWithoutAccount("ava@example.com")
+    ).resolves.toEqual(ROW);
+  });
+
+  it("returns null only when Neon confirms they are not an active member", async () => {
+    mf(findNeonAllowlistMemberByEmail).mockResolvedValue(null);
+    mf(refreshAllowlistMemberFromNeon).mockResolvedValue(null);
+
+    await expect(
+      findActiveMemberWithoutAccount("lapsed@example.com")
+    ).resolves.toBeNull();
+  });
+
+  it("says 'ask staff' — never 'not a member' — when Neon can't be reached", async () => {
+    mf(findNeonAllowlistMemberByEmail).mockResolvedValue(null);
+    mf(refreshAllowlistMemberFromNeon).mockRejectedValue(
+      new Error("Neon is down")
+    );
+
+    await expect(
+      findActiveMemberWithoutAccount("maybe@example.com")
+    ).rejects.toMatchObject({
+      status: 503,
+      message: expect.stringContaining("ask a member of staff"),
+    });
   });
 });

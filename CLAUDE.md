@@ -156,11 +156,15 @@ additions on top of upstream's changes.
   `resolveReservationCustodian` creates an account-less `TeamMember` plus a
   `MemberDirectoryLink` (email ↔ record) so they are listed once and the loan
   agreement can name them. Its required `allowDirectory` flag must be false for
-  members — they may only book for themselves. Additive:
+  members — they may only book for themselves. The kiosk walk-up uses the same
+  path for paid-up members with no account (`findActiveMemberWithoutAccount`:
+  the synced directory, then live Neon); an unreachable Neon tells them to ask
+  staff — never to "become a member" — and creates nothing. Additive:
   `app/modules/big-member-directory/`, the endpoint, the picker, the
   `MemberDirectoryLink` table. Core edits: the schema back-relations on
   `TeamMember`/`Organization`, custodian resolution in `bookings.new`, the
-  booking overview actions and `parseRoomBookingForm`, `model-filters.ts`
+  booking overview actions, `parseRoomBookingForm` and the kiosk walk-up
+  action, `model-filters.ts`
   (upstream bug: surname was never searched), and `team-member/service.server.ts`
   (upstream bug: the picker query had `take: 12` with no `orderBy`).
 - **Per-user booking-email preferences** — upstream's notification settings are

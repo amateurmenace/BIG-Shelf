@@ -16,8 +16,10 @@
  * - Walk-up booking: tap any free hour → pick a duration → type your
  *   membership email. The action resolves the email to an org member and
  *   books THEM as custodian (the kiosk account is only the creator), reusing
- *   {@link createRoomReservation} — so double-booking is rejected and the
- *   member gets the confirmation email.
+ *   {@link createRoomReservation} — so double-booking is rejected. Paid-up Neon
+ *   members who have never signed in can book too: they are checked against the
+ *   Neon directory and booked on an account-less record. Only people with an
+ *   account get the confirmation email, and the wall only promises it to them.
  * - Self-refreshing: revalidates every minute; a live clock + "now" line.
  * - Admin-managed content (Settings → Kiosk CMS): a rotating news banner at
  *   the top, up to three class/event promo cards with sign-up QR codes, a
@@ -60,7 +62,12 @@ import {
 } from "~/modules/big-kiosk-content/service.server";
 import { DEFAULT_MEMBERSHIP_SIGNUP_URL } from "~/modules/big-kiosk-content/shared";
 import type { KioskClosedDays } from "~/modules/big-kiosk-content/shared";
-import { isMemberReservationEligible } from "~/modules/big-neon-auth/service.server";
+import { resolveReservationCustodian } from "~/modules/big-member-directory/service.server";
+import { neonCustodianIdForEmail } from "~/modules/big-member-directory/shared";
+import {
+  findActiveMemberWithoutAccount,
+  isMemberReservationEligible,
+} from "~/modules/big-neon-auth/service.server";
 import {
   createRoomReservation,
   findOrgMemberByEmail,
@@ -266,16 +273,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // the booking's creator — here the STAFF kiosk account — so it never checks
     // the walk-up person. Enforce it explicitly on the CUSTODIAN's email: they
     // must be a current member (on the synced Neon allowlist, or exempt) to
-    // book. A non-member (no account, OR a lapsed membership) gets the same
-    // "become a member" response — never revealing whether an email has an
-    // account — and the wall shows a sign-up QR instead of a booking.
+    // book. A non-member (lapsed, or never a member) gets the same "become a
+    // member" response whether or not the email has an account — never
+    // revealing which — and the wall shows a sign-up QR instead of a booking.
+    //
+    // BIG: someone with NO account used to be refused here outright, so a
+    // paid-up Neon member who had simply never signed in was told to "become a
+    // member". They are now checked against the Neon directory instead (with a
+    // live Neon lookup before refusing anyone). Nothing is written yet — their
+    // account-less record is only created once every check below has passed.
+    const directoryMember = member
+      ? null
+      : await findActiveMemberWithoutAccount(email);
     const isEligible = member
       ? await isMemberReservationEligible({
           userId: member.user.id,
           organizationId,
         })
-      : false;
-    if (!member || !isEligible) {
+      : directoryMember !== null;
+    if (!isEligible) {
       return data(
         payload({ ok: false as const, needsMembership: true as const })
       );
@@ -306,16 +322,37 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
     const to = from.plus({ minutes: durationMinutes });
 
+    // Account holders already have a record. A directory-only member gets
+    // their account-less one now, reused on every later visit.
+    const custodian = member
+      ? {
+          id: member.teamMember.id,
+          userId: member.user.id as string | null,
+          firstName: member.user.firstName ?? member.teamMember.name,
+        }
+      : await resolveReservationCustodian({
+          organizationId,
+          custodianId: neonCustodianIdForEmail(email),
+          // A staff device, and their membership was confirmed above.
+          allowDirectory: true,
+        }).then((record) => ({
+          id: record.id,
+          userId: record.userId,
+          firstName: directoryMember?.firstName || record.name,
+        }));
+
     await createRoomReservation({
       organizationId,
       roomId: room.id,
       name: `${room.name} — walk-up`,
-      description: `Walk-up reservation made at the kiosk for ${member.user.email}.`,
+      description: `Walk-up reservation made at the kiosk for ${
+        member?.user.email ?? email.trim().toLowerCase()
+      }.`,
       from: from.toJSDate(),
       to: to.toJSDate(),
       creatorId: userId,
-      custodianTeamMemberId: member.teamMember.id,
-      custodianUserId: member.user.id,
+      custodianTeamMemberId: custodian.id,
+      custodianUserId: custodian.userId,
       hints,
       isSelfServiceOrBase: false,
     });
@@ -325,9 +362,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
         ok: true as const,
         confirmation: {
           roomName: room.name,
-          firstName: member.user.firstName ?? member.teamMember.name,
+          firstName: custodian.firstName,
           from: from.toJSDate(),
           to: to.toJSDate(),
+          // Booking emails go to an account; don't promise one to anyone else.
+          emailSent: custodian.userId !== null,
         },
       })
     );
@@ -1371,9 +1410,11 @@ function WalkUpBookingSheet({
               {toDT(confirmation.from).toFormat("h:mm a")} –{" "}
               {toDT(confirmation.to).toFormat("h:mm a")}
             </p>
-            <p className="mt-1 text-sm text-gray-400">
-              A confirmation email is on its way.
-            </p>
+            {confirmation.emailSent ? (
+              <p className="mt-1 text-sm text-gray-400">
+                A confirmation email is on its way.
+              </p>
+            ) : null}
             <button
               type="button"
               onClick={onClose}
@@ -1515,7 +1556,8 @@ function WalkUpBookingSheet({
                 className="mt-2 h-14 w-full rounded-lg border border-white/20 bg-gray-900 px-4 text-lg text-white placeholder:text-gray-500 focus:border-emerald-400 focus:outline-none"
               />
               <p className="mt-1.5 text-xs text-gray-400">
-                We&apos;ll book it in your name and email you the confirmation.
+                We&apos;ll book it in your name — and email a confirmation if
+                you have a BIG Shelf account.
               </p>
             </div>
 
