@@ -1,9 +1,7 @@
-import { OrganizationRoles } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { searchDirectoryMembers } from "~/modules/big-member-directory/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -45,13 +43,6 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
     deletedAt: z.string().nullable().optional(),
     userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
     usersOnly: z.coerce.boolean().optional(), // To get only the teamMembers with users (exclude NRMs)
-    /**
-     * BIG: also search the Neon member directory, so staff can reserve for a
-     * member who has never logged in and therefore has no TeamMember row.
-     * Opt-in, so every other team-member picker is unaffected.
-     * @see ~/modules/big-member-directory/service.server.ts
-     */
-    includeDirectory: z.coerce.boolean().optional(),
   }),
   BasicModelFilters.extend({
     name: z.literal("booking"),
@@ -67,29 +58,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, userOrganizations } = await getSelectedOrganization(
-      {
-        userId,
-        request,
-      }
-    );
-
-    /**
-     * BIG: only staff may search the member directory.
-     *
-     * This endpoint authenticates but does not authorize beyond org
-     * membership, so without this check ANY signed-in member could pass
-     * `includeDirectory=true` and enumerate every BIG member's name and email
-     * address. The member portal is deliberately anonymised — members see
-     * that a room is taken, never by whom — and a full membership list with
-     * contact details is exactly the kind of thing it exists to withhold.
-     */
-    const callerRoles =
-      userOrganizations?.find((org) => org.organizationId === organizationId)
-        ?.roles ?? [];
-    const callerIsStaff =
-      callerRoles.includes(OrganizationRoles.ADMIN) ||
-      callerRoles.includes(OrganizationRoles.OWNER);
+    const { organizationId } = await getSelectedOrganization({
+      userId,
+      request,
+    });
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -190,46 +162,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           : undefined,
     })) as Array<Record<string, string>>;
 
-    const filters = queryData.map((item) => ({
-      id: item.id,
-      name: item[queryKey],
-      color: item?.color,
-      metadata: item,
-      user: item?.user as any,
-    }));
-
-    /**
-     * BIG: append members who exist in Neon but have no TeamMember row yet, so
-     * staff can reserve for the whole membership rather than only the people
-     * who have logged in. Appended AFTER the real rows so existing records win
-     * the top of the list, and only when the caller opted in.
-     */
-    if (
-      modelFilters.name === "teamMember" &&
-      modelFilters.includeDirectory &&
-      callerIsStaff
-    ) {
-      const directory = await searchDirectoryMembers({
-        organizationId,
-        query: queryValue,
-      });
-
-      for (const person of directory) {
-        filters.push({
-          id: person.id,
-          name: person.name,
-          // Matches the inferred shape of the rows above (no colour on a
-          // team member), so the array stays a single type.
-          color: undefined as unknown as string,
-          // Shaped like a TeamMember row so the picker's renderer, which reads
-          // `metadata.email`, needs no special case.
-          metadata: { id: person.id, name: person.name, email: person.email },
-          user: null as any,
-        });
-      }
-    }
-
-    return data(payload({ filters }));
+    return data(
+      payload({
+        filters: queryData.map((item) => ({
+          id: item.id,
+          name: item[queryKey],
+          color: item?.color,
+          metadata: item,
+          user: item?.user as any,
+        })),
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

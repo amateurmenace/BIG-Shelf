@@ -1,174 +1,219 @@
 /**
  * Member directory service
  *
- * BIG: lets staff reserve equipment and rooms for ANY member of the
- * organisation, not just the handful who happen to have logged in.
+ * BIG: lets staff reserve equipment and rooms for ANYONE in the organisation —
+ * staff, members with accounts, and the Neon members who have never logged in.
  *
- * The problem this solves: a booking's custodian must be a `TeamMember`, and a
- * `TeamMember` row only exists once someone has been invited or has signed in.
- * BIG's actual membership lives in Neon CRM and is mirrored into
- * `NeonAllowlistMember` — 113 people, of whom only one had ever logged in. So
- * the "Reserved for" picker could offer about a dozen staff and essentially no
- * members, which made booking on a member's behalf impossible for exactly the
- * people it was built for.
+ * Why this exists: a booking's custodian must be a `TeamMember`, and that row
+ * only exists once someone has been invited or has signed in. BIG's actual
+ * membership lives in Neon CRM (mirrored into `NeonAllowlistMember`, ~105
+ * people), and almost none of them have ever logged in. A picker that only
+ * reads `TeamMember` therefore offers staff and nobody else.
  *
- * The picker therefore searches both sets, and a Neon-only person is turned
- * into a real `TeamMember` lazily — at the moment someone is actually reserved
- * for, never in bulk. Creating 113 rows up front would fill the Team settings
- * page with people who have no relationship to Shelf.
+ * So the picker is fed the COMPLETE list from {@link listReservablePeople} —
+ * every team member plus every Neon member not already among them — and
+ * searches it in the browser. The population is small (low hundreds), so
+ * loading it whole is cheaper and far more reliable than server-side paging.
  *
- * A materialised row is a non-registered member (`userId: null`) unless a
- * matching account already exists, in which case it is linked. When that person
- * later signs up, shelf's invite-acceptance flow links their new account to the
- * same row, so their booking history follows them.
+ * A Neon-only person is turned into a real `TeamMember` lazily, at the moment
+ * someone is actually reserved for ({@link resolveReservationCustodian}), and
+ * a `MemberDirectoryLink` records which email it was created for. Creating
+ * ~105 rows up front would fill Team settings with people who have no
+ * relationship to Shelf.
  *
- * @see {@link file://./shared.ts} — the client-safe id prefix
- * @see {@link file://./../big-neon-sync/service.server.ts} — how the allowlist is filled
- * @see {@link file://./../../routes/api+/model-filters.ts} — the picker's search endpoint
+ * @see {@link file://./shared.ts} — id format, person type, client-side search
+ * @see {@link file://./../../routes/api+/big-reservable-people.ts} — the endpoint
+ * @see {@link file://./../../components/big/member-picker.tsx} — the picker
  */
+import { Prisma } from "@prisma/client";
 import type { Organization, User } from "@prisma/client";
 import { db } from "~/database/db.server";
+import type { AdditionalData } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { resolveUserDisplayName } from "~/utils/user";
+import type { ReservablePerson } from "./shared";
 import {
-  NEON_CUSTODIAN_PREFIX,
+  emailFromNeonCustodianId,
   isNeonCustodianId,
-  neonAllowlistIdFromCustodianId,
+  neonCustodianIdForEmail,
 } from "./shared";
 
 const label = "Team Member" as const;
 
-/** One Neon-only person, shaped like a picker option. */
-export type DirectoryOption = {
-  /** `neon:<allowlistId>` — not a Shelf id. */
-  id: string;
-  name: string;
-  email: string;
-};
-
-/** Builds a display name, falling back to the email when Neon has no name. */
-function displayName(row: {
+/** A Neon member's display name, falling back to their email. */
+function directoryName(row: {
   firstName: string | null;
   lastName: string | null;
   email: string;
 }): string {
   const full = [row.firstName, row.lastName]
-    .filter((part) => part && part.trim())
-    .join(" ")
-    .trim();
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ");
   return full || row.email;
 }
 
 /**
- * Finds Neon members who have no `TeamMember` row in this organization.
+ * Lists everyone staff can reserve for in this organization — one row per
+ * person, sorted by name.
  *
- * Anyone who already has a row is excluded, because they are returned by the
- * ordinary team-member query and would otherwise appear twice in the picker.
+ * Sources, and which wins when two describe the same person (same email):
+ * 1. a team member with an account (staff, and members who have signed in);
+ * 2. an account-less team member created for a Neon member earlier;
+ * 3. a Neon member with no record yet (id `neon:<email>`).
  *
- * @param args.organizationId - The caller's organization.
- * @param args.query - Free text matched against first name, last name and
- *   email. An empty query returns the first `take` alphabetically, so the
- *   picker shows something before the user types.
- * @param args.take - Maximum rows to return.
- * @returns Picker options carrying `neon:`-prefixed ids.
+ * Team members that have never had an email (placeholder records such as the
+ * organization itself) are listed once each.
+ *
+ * @param args.organizationId - The caller's organization; team-member and link
+ *   reads are scoped to it. The Neon allowlist has no organization column — it
+ *   mirrors Neon, BIG's single membership source.
+ * @returns Every reservable person.
+ * @throws {ShelfError} When the database read fails.
  */
-export async function searchDirectoryMembers({
+export async function listReservablePeople({
   organizationId,
-  query,
-  take = 25,
 }: {
   organizationId: Organization["id"];
-  query?: string | null;
-  take?: number;
-}): Promise<DirectoryOption[]> {
+}): Promise<ReservablePerson[]> {
   try {
-    const trimmed = (query ?? "").trim();
+    const [teamMembers, directory] = await Promise.all([
+      db.teamMember.findMany({
+        where: { organizationId, deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          userId: true,
+          user: {
+            select: {
+              email: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
+            },
+          },
+          directoryLink: { select: { email: true } },
+        },
+      }),
+      db.neonAllowlistMember.findMany({
+        select: { email: true, firstName: true, lastName: true },
+      }),
+    ]);
 
-    /**
-     * `NeonAllowlistMember` is deliberately global — it mirrors Neon CRM,
-     * which is BIG's single membership source, and carries no organizationId
-     * column. Org scoping is applied where it matters: the exclusion below and
-     * any row we create are both scoped to the caller's organization.
-     */
-    const candidates = await db.neonAllowlistMember.findMany({
-      where: trimmed
-        ? {
-            OR: [
-              { firstName: { contains: trimmed, mode: "insensitive" } },
-              { lastName: { contains: trimmed, mode: "insensitive" } },
-              { email: { contains: trimmed, mode: "insensitive" } },
-            ],
-          }
-        : undefined,
-      select: { id: true, email: true, firstName: true, lastName: true },
-      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-      // Over-fetch: some candidates are dropped below for already having a
-      // TeamMember row, and we still want a full page after that filtering.
-      take: take * 3,
-    });
+    const byEmail = new Map<string, ReservablePerson>();
+    const withoutEmail: ReservablePerson[] = [];
 
-    if (candidates.length === 0) return [];
+    for (const member of teamMembers) {
+      const email =
+        member.user?.email?.toLowerCase() ??
+        member.directoryLink?.email ??
+        null;
+      const person: ReservablePerson = {
+        id: member.id,
+        // An account's own name beats the record's, which can be stale.
+        name:
+          (member.user && resolveUserDisplayName(member.user)) || member.name,
+        email,
+        userId: member.userId,
+        hasAccount: Boolean(member.userId),
+      };
 
-    const emails = candidates.map((row) => row.email.toLowerCase());
+      if (!email) {
+        withoutEmail.push(person);
+        continue;
+      }
 
-    // Everyone in this org who already has a TeamMember row, by email.
-    const existing = await db.teamMember.findMany({
-      where: {
-        organizationId,
-        deletedAt: null,
-        user: { email: { in: emails } },
-      },
-      select: { user: { select: { email: true } } },
-    });
-    const taken = new Set(
-      existing
-        .map((row) => row.user?.email?.toLowerCase())
-        .filter((email): email is string => Boolean(email))
+      // Rule 1 beats rule 2: someone who signed up after being reserved for
+      // has both an account record and the older account-less one.
+      const existing = byEmail.get(email);
+      if (!existing || (!existing.hasAccount && person.hasAccount)) {
+        byEmail.set(email, person);
+      }
+    }
+
+    for (const row of directory) {
+      const email = row.email.toLowerCase();
+      if (byEmail.has(email)) continue;
+
+      byEmail.set(email, {
+        id: neonCustodianIdForEmail(email),
+        name: directoryName(row),
+        email,
+        userId: null,
+        hasAccount: false,
+      });
+    }
+
+    return [...byEmail.values(), ...withoutEmail].sort(
+      (a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
+        (a.email ?? "").localeCompare(b.email ?? "")
     );
-
-    return candidates
-      .filter((row) => !taken.has(row.email.toLowerCase()))
-      .slice(0, take)
-      .map((row) => ({
-        id: `${NEON_CUSTODIAN_PREFIX}${row.id}`,
-        name: displayName(row),
-        email: row.email,
-      }));
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Could not search the member directory.",
+      message: "Could not load the member list.",
       additionalData: { organizationId },
       label,
     });
   }
 }
 
+/** What a reservation form's custodian resolves to. */
+type ResolvedCustodian = {
+  id: string;
+  userId: User["id"] | null;
+  name: string;
+};
+
+/** A 404 for a pick that matches nothing this organization can reserve for. */
+function memberNotFound(message: string, additionalData: AdditionalData) {
+  return new ShelfError({
+    cause: null,
+    title: "Member not found",
+    message,
+    additionalData,
+    status: 404,
+    shouldBeCaptured: false,
+    label,
+  });
+}
+
 /**
- * Turns a custodian id from a reservation form into a real `TeamMember` id.
+ * Turns the custodian id a reservation form submitted into a real
+ * `TeamMember`, creating one for a Neon member who has no record yet.
  *
- * Pass-through for an ordinary Shelf id, after proving it belongs to the
- * caller's organization. For a `neon:` id it finds or creates the member's
- * `TeamMember` row and returns that instead.
+ * - An ordinary id is looked up scoped to the caller's organization, so a
+ *   forged id from another organization is a 404, never a cross-org booking.
+ * - A `neon:<email>` id must be a CURRENT Neon member. It reuses their
+ *   existing record when there is one — their account's, or the account-less
+ *   one made the first time they were reserved for — and otherwise creates an
+ *   account-less record plus the link that ties it to their email.
  *
- * Idempotent: reserving twice for the same Neon member reuses the first row
- * rather than creating a duplicate.
+ * Idempotent and race-safe: two staff reserving for the same person at once
+ * end up with one record.
  *
- * @param args.organizationId - The caller's organization; every read and write
- *   here is scoped to it.
- * @param args.custodianId - Either a `TeamMember` id or `neon:<allowlistId>`.
- * @returns The resolved team member's id and userId (null for a
- *   non-registered member).
- * @throws {ShelfError} 404 when the id matches nothing this organization can
- *   reserve for.
+ * @param args.organizationId - The caller's organization.
+ * @param args.custodianId - A `TeamMember` id, or `neon:<email>`.
+ * @param args.allowDirectory - Whether the caller may reserve for someone
+ *   without a record. Must be false for members/self-service, who can only
+ *   book for themselves — otherwise a crafted form could make Shelf create
+ *   records for arbitrary Neon members before the route's own-booking check
+ *   rejects the request.
+ * @returns The team member to put on the booking.
+ * @throws {ShelfError} 404 when nothing matches; 403 for a directory pick
+ *   when `allowDirectory` is false.
  * @see .claude/rules/org-scope-user-supplied-ids.md
  */
 export async function resolveReservationCustodian({
   organizationId,
   custodianId,
+  allowDirectory,
 }: {
   organizationId: Organization["id"];
   custodianId: string;
-}): Promise<{ id: string; userId: User["id"] | null; name: string }> {
+  allowDirectory: boolean;
+}): Promise<ResolvedCustodian> {
   if (!isNeonCustodianId(custodianId)) {
     const teamMember = await db.teamMember.findFirst({
       where: { id: custodianId, organizationId, deletedAt: null },
@@ -176,71 +221,116 @@ export async function resolveReservationCustodian({
     });
 
     if (!teamMember) {
-      throw new ShelfError({
-        cause: null,
-        title: "Member not found",
-        message:
-          "The person this reservation is for could not be found in this workspace.",
-        additionalData: { organizationId, custodianId },
-        status: 404,
-        shouldBeCaptured: false,
-        label,
-      });
+      throw memberNotFound(
+        "The person this reservation is for could not be found in this workspace.",
+        { organizationId, custodianId }
+      );
     }
 
     return teamMember;
   }
 
-  const allowlistId = neonAllowlistIdFromCustodianId(custodianId);
-  const member = await db.neonAllowlistMember.findUnique({
-    where: { id: allowlistId },
-    select: { id: true, email: true, firstName: true, lastName: true },
-  });
-
-  if (!member) {
+  if (!allowDirectory) {
     throw new ShelfError({
       cause: null,
-      title: "Member not found",
-      message:
-        "That member is no longer in the directory. They may have been removed from Neon since this page loaded.",
+      title: "Not allowed",
+      message: "You can only make reservations for yourself.",
       additionalData: { organizationId, custodianId },
-      status: 404,
+      status: 403,
       shouldBeCaptured: false,
       label,
     });
   }
 
-  const email = member.email.toLowerCase();
+  const email = emailFromNeonCustodianId(custodianId);
+  const member = email.includes("@")
+    ? await db.neonAllowlistMember.findUnique({
+        where: { email },
+        select: { email: true, firstName: true, lastName: true },
+      })
+    : null;
 
-  // An account may exist even though no TeamMember row does — e.g. they signed
-  // up but were never added to this workspace. Link it rather than creating an
-  // orphan NRM that would split their history in two.
-  const account = await db.user.findFirst({
-    where: { email },
-    select: { id: true },
-  });
+  if (!member) {
+    throw memberNotFound(
+      "That member is no longer in the directory — their Neon membership may have lapsed since this page loaded. Reload the page and pick them again.",
+      { organizationId, custodianId }
+    );
+  }
 
-  // Reuse an existing row if one appeared since the picker loaded (two staff
-  // reserving for the same person at once, or a mid-session Neon sync).
-  const existing = await db.teamMember.findFirst({
+  const existing = await findExistingRecord({ organizationId, email });
+  if (existing) return existing;
+
+  try {
+    return await db.$transaction(async (tx) => {
+      const teamMember = await tx.teamMember.create({
+        data: { name: directoryName(member), organizationId },
+        select: { id: true, userId: true, name: true },
+      });
+
+      // Upsert, not create: a link can outlive its record's soft-deletion
+      // (staff removed the person from Team). Re-point it at the new record.
+      await tx.memberDirectoryLink.upsert({
+        where: { organizationId_email: { organizationId, email } },
+        create: { organizationId, email, teamMemberId: teamMember.id },
+        update: { teamMemberId: teamMember.id },
+      });
+
+      return teamMember;
+    });
+  } catch (cause) {
+    // Lost a race with a concurrent reservation for the same person: the
+    // unique (organizationId, email) link rolled our transaction back, so
+    // return the record the winner created.
+    if (
+      cause instanceof Prisma.PrismaClientKnownRequestError &&
+      cause.code === "P2002"
+    ) {
+      const winner = await findExistingRecord({ organizationId, email });
+      if (winner) return winner;
+    }
+
+    throw new ShelfError({
+      cause,
+      message: "Could not create a record for this member.",
+      additionalData: { organizationId, custodianId },
+      label,
+    });
+  }
+}
+
+/**
+ * Finds the live record already representing this email in the organization:
+ * their account's team member first, then an account-less one linked to them.
+ */
+async function findExistingRecord({
+  organizationId,
+  email,
+}: {
+  organizationId: Organization["id"];
+  email: string;
+}): Promise<ResolvedCustodian | null> {
+  const withAccount = await db.teamMember.findFirst({
     where: {
       organizationId,
       deletedAt: null,
-      ...(account
-        ? { userId: account.id }
-        : { name: displayName(member), userId: null }),
+      user: { email: { equals: email, mode: "insensitive" } },
     },
     select: { id: true, userId: true, name: true },
   });
+  if (withAccount) return withAccount;
 
-  if (existing) return existing;
-
-  return db.teamMember.create({
-    data: {
-      name: displayName(member),
-      organizationId,
-      ...(account ? { userId: account.id } : {}),
+  const link = await db.memberDirectoryLink.findUnique({
+    where: { organizationId_email: { organizationId, email } },
+    select: {
+      teamMember: {
+        select: { id: true, userId: true, name: true, deletedAt: true },
+      },
     },
-    select: { id: true, userId: true, name: true },
   });
+  if (link && !link.teamMember.deletedAt) {
+    const { deletedAt: _deletedAt, ...teamMember } = link.teamMember;
+    return teamMember;
+  }
+
+  return null;
 }

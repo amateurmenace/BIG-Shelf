@@ -495,6 +495,8 @@ export async function parseRoomBookingForm({
   const custodianFromDb = await resolveReservationCustodian({
     organizationId,
     custodianId: custodian.id,
+    // Members book rooms for themselves only; staff may pick anyone.
+    allowDirectory: !isSelfServiceOrBase,
   });
 
   // Restricted roles book for themselves only.

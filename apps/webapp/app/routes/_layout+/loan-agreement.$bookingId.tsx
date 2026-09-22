@@ -105,6 +105,12 @@ async function loadContext({
       custodianUser: {
         select: { firstName: true, lastName: true, email: true },
       },
+      // BIG: a booking made for a member with no account has no custodianUser.
+      // Their name is on the team member, and their email on its directory
+      // link — without these the agreement named "the borrower", no email.
+      custodianTeamMember: {
+        select: { name: true, directoryLink: { select: { email: true } } },
+      },
       assets: { select: { title: true }, orderBy: { title: "asc" } },
     },
   });
@@ -135,7 +141,13 @@ async function loadContext({
   const borrowerName =
     [booking.custodianUser?.firstName, booking.custodianUser?.lastName]
       .filter(Boolean)
-      .join(" ") || "the borrower";
+      .join(" ") ||
+    booking.custodianTeamMember?.name ||
+    "the borrower";
+  const borrowerEmail =
+    booking.custodianUser?.email ??
+    booking.custodianTeamMember?.directoryLink?.email ??
+    "";
   const equipmentList = booking.assets.length
     ? booking.assets.map((asset) => `- ${asset.title}`).join("\n")
     : "- (equipment will be listed at checkout)";
@@ -143,7 +155,7 @@ async function loadContext({
   const merge: AgreementMergeData = {
     organizationName,
     borrowerName,
-    borrowerEmail: booking.custodianUser?.email ?? "",
+    borrowerEmail,
     equipmentList,
     checkoutDate: formatAgreementDate(booking.from),
     dueDate: formatAgreementDate(booking.to),
@@ -151,7 +163,7 @@ async function loadContext({
 
   const filledContent = fillAgreement(template.content, merge);
 
-  return { booking, template, filledContent, borrowerName };
+  return { booking, template, filledContent, borrowerName, borrowerEmail };
 }
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -230,13 +242,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const formData = await request.formData();
     const { signerName } = parseSignForm(formData);
 
-    const { booking, template, filledContent } = await loadContext({
-      bookingId,
-      organizationId,
-      organizationName: currentOrganization.name,
-      userId,
-      role,
-    });
+    const { booking, template, filledContent, borrowerEmail } =
+      await loadContext({
+        bookingId,
+        organizationId,
+        organizationName: currentOrganization.name,
+        userId,
+        role,
+      });
 
     // Guard against a template disappearing between load and sign.
     const active = await getActiveTemplate(organizationId);
@@ -255,7 +268,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       bookingId: booking.id,
       signedByUserId: userId,
       signerName,
-      signerEmail: booking.custodianUser?.email ?? "",
+      signerEmail: borrowerEmail,
       template,
       contentSnapshot: filledContent,
       ipAddress:

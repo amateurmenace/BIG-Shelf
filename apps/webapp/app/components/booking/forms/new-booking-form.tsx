@@ -16,7 +16,6 @@ import type {
 import { useHints } from "~/utils/client-hints";
 
 import { getValidationErrors } from "~/utils/http";
-import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { tw } from "~/utils/tw";
 import { DatesFields } from "./fields/dates";
 import { DescriptionField } from "./fields/description";
@@ -44,7 +43,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const fetcher = useFetcher<NewBookingActionReturnType>();
   const { custodianRef, assetIds } = booking;
 
-  const { teamMembers, teamMembersForForm, userId, currentOrganization, tags } =
+  const { teamMembers, teamMembersForForm, userId, tags } =
     useLoaderData<NewBookingLoaderReturnType>();
   const tagsSuggestions = tags.map((tag) => ({
     label: tag.name,
@@ -60,8 +59,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 
-  const { roles, isBaseOrSelfService, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const { isBaseOrSelfService, isAdministratorOrOwner } = useUserRoleHelper();
 
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
     getBookingDefaultStartEndTimes(
@@ -98,13 +96,6 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
    * workspace, in which case "Myself" is disabled and the picker is shown.
    */
   const ownTeamMember = teamMembersToUse?.find((m) => m.userId === userId);
-
-  const userCanSeeCustodian = userCanViewSpecificCustody({
-    roles,
-    custodianUserId: defaultTeamMember?.user?.id,
-    organization: currentOrganization,
-    currentUserId: userId,
-  });
 
   // Re-sync endDate when the computed default changes (e.g. when working hours or
   // buffer settings load). Uses the React "store previous value in a ref" pattern
@@ -166,8 +157,6 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
                   defaultTeamMember={defaultTeamMember}
                   disabled={disabled}
                   lockedToSelf={isBaseOrSelfService}
-                  userCanSeeCustodian={userCanSeeCustodian}
-                  isNewBooking={true}
                   error={
                     validationErrors?.custodian?.message ||
                     zo.errors.custodian()?.message

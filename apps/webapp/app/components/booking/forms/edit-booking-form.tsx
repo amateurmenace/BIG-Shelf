@@ -15,7 +15,6 @@ import type {
 import { useHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
-import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import {
   PermissionAction,
   PermissionEntity,
@@ -89,7 +88,6 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     teamMembers,
     teamMembersForForm,
     userId,
-    currentOrganization,
     lifecycleProgress,
   } = useLoaderData<BookingPageLoaderData>();
 
@@ -208,13 +206,6 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
 
   /** The signed-in user's own team-member row, backing the "Myself" choice. */
   const ownTeamMember = teamMembersToUse?.find((m) => m.userId === userId);
-
-  const userCanSeeCustodian = userCanViewSpecificCustody({
-    roles,
-    custodianUserId: defaultTeamMember?.user?.id,
-    organization: currentOrganization,
-    currentUserId: userId,
-  });
 
   /**
    * Sync the editable `endDate` state with the `incomingEndDate` prop when it
@@ -518,7 +509,6 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                     disabled || isLoadingWorkingHours || inputFieldIsDisabled
                   }
                   lockedToSelf={isBaseOrSelfService}
-                  userCanSeeCustodian={userCanSeeCustodian}
                   error={
                     validationErrors?.custodian?.message ||
                     zo.errors.custodian()?.message

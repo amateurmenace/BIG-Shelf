@@ -944,6 +944,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ? await resolveReservationCustodian({
               organizationId,
               custodianId: parsedData.custodian.id,
+              allowDirectory: !isSelfServiceOrBase,
             })
           : null;
 
@@ -1011,6 +1012,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ? await resolveReservationCustodian({
               organizationId,
               custodianId: parsedData.custodian.id,
+              allowDirectory: !isSelfServiceOrBase,
             })
           : null;
 

@@ -206,6 +206,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const custodianFromDb = await resolveReservationCustodian({
       organizationId,
       custodianId: custodian.id,
+      // Only staff may reserve for someone without a record yet.
+      allowDirectory: !isSelfServiceOrBase,
     });
 
     /**

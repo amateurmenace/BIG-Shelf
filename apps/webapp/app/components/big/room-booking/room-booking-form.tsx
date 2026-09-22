@@ -280,7 +280,7 @@ export function RoomBookingForm({
           }
           disabled={disabled}
           error={validationErrors?.custodian?.message}
-          hint="Search any BIG member by name or email — they do not need to have logged in before."
+          hint="Search anyone by name or email — every BIG member is here, including people who have never logged in."
         />
       )}
 

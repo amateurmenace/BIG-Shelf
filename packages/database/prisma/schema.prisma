@@ -703,6 +703,10 @@ model TeamMember {
   assetReminders  AssetReminder[]
   teamMemberNotes TeamMemberNote[]
 
+  /// BIG: set when this is a non-registered record created for a Neon member
+  /// who had no account — the only thing tying the record back to them.
+  directoryLink MemberDirectoryLink?
+
   // Booking notification settings
   alwaysNotifyBookingSettings BookingSettings[] @relation("BookingSettingsAlwaysNotify")
   bookingNotifications        Booking[]         @relation("BookingNotificationRecipients")
@@ -804,6 +808,8 @@ model Organization {
 
   /// BIG: per-user booking-email preferences scoped to this workspace.
   bookingNotificationPreferences UserBookingNotificationPreference[]
+  // BIG: which non-registered team members were created for Neon members
+  memberDirectoryLinks           MemberDirectoryLink[]
 
   // Migration flag to track if sequential IDs have been generated for this organization's existing assets
   hasSequentialIdsMigrated Boolean @default(false)
@@ -2260,6 +2266,37 @@ model NeonAllowlistMember {
   updatedAt     DateTime @updatedAt
 
   @@index([neonAccountId])
+}
+
+/// BIG: records which directory (Neon) member a non-registered TeamMember was
+/// created for.
+///
+/// Staff reserve for members who have never logged in by picking them from the
+/// Neon directory; that creates a non-registered TeamMember to hold the booking.
+/// A TeamMember has no email column, so without this row the record could only
+/// be recognised again by NAME — the person then appeared twice in the
+/// "Reserved for" picker, and two members sharing a name would have been
+/// silently merged into one.
+///
+/// Keyed by email, not by NeonAllowlistMember id: the Neon sync deletes and
+/// re-inserts every allowlist row, so those ids change on every run.
+model MemberDirectoryLink {
+  id String @id @default(cuid())
+
+  teamMember   TeamMember @relation(fields: [teamMemberId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  teamMemberId String     @unique
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  organizationId String
+
+  /// Lowercased — the same key `NeonAllowlistMember.email` uses.
+  email String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One record per person per workspace. Also serves lookups by organization.
+  @@unique([organizationId, email])
 }
 
 /// BIG: per-user, per-workspace control over the booking emails a person receives

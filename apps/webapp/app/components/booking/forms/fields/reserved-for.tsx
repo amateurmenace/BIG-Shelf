@@ -10,15 +10,17 @@
  * that the common case — *I* am booking this for *myself* — is one click, and
  * booking for someone else is an explicit, obvious choice.
  *
- * When "Someone else" is chosen, the reservation is made in that person's name
- * and they are emailed to confirm it.
+ * When "Someone else" is chosen, the picker offers EVERYONE — staff, members
+ * with accounts, and Neon members who have never logged in — and the
+ * reservation is made in that person's name. People with an account are
+ * emailed to confirm it; for anyone without one it simply stands.
+ * @see {@link file://./../../../big/member-picker.tsx}
  * @see {@link file://./../../../../modules/big-booking-acceptance/service.server.ts}
  */
 import { useState } from "react";
-import DynamicSelect from "~/components/dynamic-select/dynamic-select";
+import { MemberPicker } from "~/components/big/member-picker";
 import FormRow from "~/components/forms/form-row";
 import { Card } from "~/components/shared/card";
-import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import { RESERVED_FOR } from "~/modules/big-booking-acceptance/shared";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -45,8 +47,6 @@ export function ReservedForField({
   /** Pre-selected team member (editing an existing booking). */
   defaultTeamMember,
   disabled,
-  userCanSeeCustodian,
-  isNewBooking,
   error,
   /**
    * Base/self-service users can only book for themselves, so the choice is
@@ -57,8 +57,6 @@ export function ReservedForField({
   ownTeamMember?: TeamMemberType;
   defaultTeamMember: TeamMemberType | undefined;
   disabled: boolean;
-  userCanSeeCustodian: boolean;
-  isNewBooking?: boolean;
   error?: string;
   lockedToSelf?: boolean;
 }) {
@@ -163,67 +161,26 @@ export function ReservedForField({
         </>
       ) : (
         <>
-          <DynamicSelect
+          <MemberPicker
             key="reserved-for-picker"
+            label={null}
+            disabled={disabled}
             defaultValue={
               defaultTeamMember && defaultTeamMember.id !== ownTeamMember?.id
-                ? serializeTeamMember(defaultTeamMember)
-                : undefined
+                ? {
+                    id: defaultTeamMember.id,
+                    name: resolveTeamMemberName(defaultTeamMember),
+                    userId: defaultTeamMember.userId,
+                    email: defaultTeamMember.user?.email ?? null,
+                    hasAccount: Boolean(defaultTeamMember.userId),
+                  }
+                : null
             }
-            disabled={disabled}
-            model={{
-              name: "teamMember",
-              queryKey: "name",
-              deletedAt: null,
-              /**
-               * BIG: search the whole Neon membership, not just people who
-               * have a Shelf record. Most members have never logged in, so
-               * without this the picker offers staff and almost nobody else.
-               * @see ~/modules/big-member-directory/service.server.ts
-               */
-              includeDirectory: true,
-            }}
-            fieldName="custodian"
-            contentLabel="Team members"
-            initialDataKey="teamMembersForForm"
-            countKey="totalTeamMembers"
-            placeholder="Search members by name or email"
-            allowClear
-            closeOnSelect
-            transformItem={(item: ModelFilterItem & { userId?: string }) => ({
-              ...item,
-              id: JSON.stringify({
-                id: item.id,
-                // If there is a user, we use its name, otherwise the team
-                // member's own name (non-registered members).
-                name: resolveTeamMemberName(item),
-                userId: item?.userId,
-              }),
-            })}
-            renderItem={(item) => {
-              if (!userCanSeeCustodian && !isNewBooking) return "Private";
-
-              const email = (item as { metadata?: { email?: string } })
-                ?.metadata?.email;
-
-              return (
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate">
-                    {resolveTeamMemberName(item, true)}
-                  </span>
-                  {email ? (
-                    <span className="truncate text-xs text-gray-500">
-                      {email}
-                    </span>
-                  ) : null}
-                </span>
-              );
-            }}
           />
           <p className="mt-2 text-[14px] text-gray-600">
-            Search any BIG member by name or email — they do not need to have
-            logged in before. The reservation goes in their name and they are
-            emailed to confirm it; the equipment is held for them straight away.
+            Search anyone by name or email — every BIG member is here, including
+            people who have never logged in. The equipment is held in their name
+            straight away. If they have an account they are emailed to confirm.
           </p>
         </>
       )}

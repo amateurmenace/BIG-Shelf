@@ -142,6 +142,27 @@ additions on top of upstream's changes.
   Core edits: `login.tsx`, `join.tsx`, `send-otp.tsx`, `otp.tsx`,
   `server/index.ts` (public-route allowlist), the user service,
   `utils/env.ts` (the `NEON_*` vars).
+- **Reserve for any member** — staff can reserve equipment/rooms for EVERYONE,
+  not just people with a `TeamMember` row. BIG's membership lives in Neon
+  (~105 in `NeonAllowlistMember`) and almost none of them have ever logged in,
+  so a picker over `TeamMember` offered staff and nobody else. The "Reserved
+  for" picker (`components/big/member-picker.tsx`, used by the booking forms,
+  the assets-index booking dialog and the staff room form) loads the COMPLETE
+  list once from staff-only `api+/big-reservable-people.ts` and searches it in
+  the browser — deliberately NOT upstream's paged `DynamicSelect`, which only
+  asks the server when it thinks its first page is incomplete and so never
+  reached the directory. Neon-only people carry a `neon:<email>` id (email,
+  because the sync re-inserts allowlist rows, changing their ids); on submit
+  `resolveReservationCustodian` creates an account-less `TeamMember` plus a
+  `MemberDirectoryLink` (email ↔ record) so they are listed once and the loan
+  agreement can name them. Its required `allowDirectory` flag must be false for
+  members — they may only book for themselves. Additive:
+  `app/modules/big-member-directory/`, the endpoint, the picker, the
+  `MemberDirectoryLink` table. Core edits: the schema back-relations on
+  `TeamMember`/`Organization`, custodian resolution in `bookings.new`, the
+  booking overview actions and `parseRoomBookingForm`, `model-filters.ts`
+  (upstream bug: surname was never searched), and `team-member/service.server.ts`
+  (upstream bug: the picker query had `take: 12` with no `orderBy`).
 - **Per-user booking-email preferences** — upstream's notification settings are
   org-level and all-or-nothing (`BookingSettings.notifyAdminsOnNewBooking` mails
   EVERY admin on EVERY reservation), so silencing one over-notified person meant

@@ -21,10 +21,9 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getValidationErrors } from "~/utils/http";
-import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
 export default function CreateBookingForSelectedAssetsDialog() {
-  const { currentOrganization, teamMembers, teamMembersForForm, tagsData } =
+  const { teamMembers, teamMembersForForm, tagsData } =
     useLoaderData<AssetIndexLoaderData>();
   const tagsSuggestions = tagsData.tags.map((tag) => ({
     label: tag.name,
@@ -34,8 +33,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
-  const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const { isBaseOrSelfService, isAdministratorOrOwner } = useUserRoleHelper();
 
   const zo = useZorm(
     "CreateBookingWithAssets",
@@ -65,13 +63,6 @@ export default function CreateBookingForSelectedAssetsDialog() {
 
   /** The signed-in user's own team-member row, backing the "Myself" choice. */
   const ownTeamMember = teamMembersToUse.find((tm) => tm.userId === user?.id);
-
-  const userCanSeeCustodian = userCanViewSpecificCustody({
-    roles,
-    custodianUserId: defaultTeamMember?.userId || null,
-    organization: currentOrganization,
-    currentUserId: user?.id,
-  });
 
   // Re-sync endDate when the computed default changes (e.g. when working hours or
   // buffer settings load). Uses the React "store previous value in a ref" pattern
@@ -139,8 +130,6 @@ export default function CreateBookingForSelectedAssetsDialog() {
                 defaultTeamMember={defaultTeamMember}
                 disabled={disabled}
                 lockedToSelf={isBaseOrSelfService}
-                userCanSeeCustodian={userCanSeeCustodian}
-                isNewBooking
                 error={
                   validationErrors?.custodian?.message ||
                   zo.errors.custodian()?.message

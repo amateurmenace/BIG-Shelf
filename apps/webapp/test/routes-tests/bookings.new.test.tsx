@@ -190,6 +190,8 @@ describe("bookings/new - custodian assignment", () => {
     expect(mockResolveCustodian).toHaveBeenCalledWith({
       custodianId: "foreign-team-member-123",
       organizationId: "org-1",
+      // Admins may reserve for people with no record yet.
+      allowDirectory: true,
     });
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
@@ -232,6 +234,8 @@ describe("bookings/new - custodian assignment", () => {
     expect(mockResolveCustodian).toHaveBeenCalledWith({
       custodianId: "team-member-123",
       organizationId: "org-1",
+      // Admins may reserve for people with no record yet.
+      allowDirectory: true,
     });
   });
 
@@ -306,6 +310,12 @@ describe("bookings/new - custodian assignment", () => {
     const response = await action(createActionArgs({ request }));
 
     expect((response as Response).status).toBe(500); // ShelfError defaults to 500
+
+    // Members can never reserve for someone without a record: the resolver is
+    // told so, and refuses before it creates anything.
+    expect(mockResolveCustodian).toHaveBeenCalledWith(
+      expect.objectContaining({ allowDirectory: false })
+    );
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
   });
