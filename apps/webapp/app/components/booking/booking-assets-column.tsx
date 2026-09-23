@@ -7,6 +7,11 @@ import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 
 /**
  * Type assertion helper for booking assets.
@@ -51,7 +56,8 @@ export function BookingAssetsColumn() {
   // const [searchParams] = useSearchParams();
 
   const hasItems = paginatedItems?.length > 0;
-  const { isBase, isSelfService, isBaseOrSelfService } = useUserRoleHelper();
+  const { isBase, isSelfService, isBaseOrSelfService, roles } =
+    useUserRoleHelper();
   const { isCompleted, isArchived, isCancelled } = useBookingStatusHelpers(
     booking.status
   );
@@ -103,6 +109,20 @@ export function BookingAssetsColumn() {
     hideUnavailable: "true",
     unhideAssetsBookigIds: booking.id,
   })}`;
+
+  /**
+   * BIG: gear that isn't in the system yet can be created from the booking and
+   * lands straight in it (`/assets/new?booking=`), instead of leaving the
+   * booking, creating the asset, and coming back to add it. Only offered to
+   * people who may create assets.
+   */
+  const newAssetUrl = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.create,
+  })
+    ? `/assets/new?booking=${booking.id}`
+    : null;
 
   // Self service can only manage assets for bookings that are DRAFT
   const cantManageAssetsAsBase =
@@ -202,6 +222,7 @@ export function BookingAssetsColumn() {
               itemsGetter={itemsGetter}
               manageAssetsUrl={manageAssetsUrl}
               manageAssetsButtonDisabled={manageAssetsButtonDisabled}
+              newAssetUrl={newAssetUrl}
             />
           </div>
 
@@ -349,6 +370,8 @@ interface BookingAssetsHeaderProps {
   itemsGetter: (data: any) => any[];
   manageAssetsUrl: string;
   manageAssetsButtonDisabled: any;
+  /** BIG: where "New asset" goes; null when the user may not create assets. */
+  newAssetUrl: string | null;
 }
 
 function BookingAssetsHeader({
@@ -356,6 +379,7 @@ function BookingAssetsHeader({
   itemsGetter,
   manageAssetsUrl,
   manageAssetsButtonDisabled,
+  newAssetUrl,
 }: BookingAssetsHeaderProps) {
   const { isMd } = useViewportHeight();
   // const [searchParams] = useSearchParams();
@@ -411,6 +435,17 @@ function BookingAssetsHeader({
             >
               Add a room
             </Button>
+            {newAssetUrl ? (
+              <Button
+                to={newAssetUrl}
+                variant="secondary"
+                className="whitespace-nowrap"
+                disabled={manageAssetsButtonDisabled}
+                tooltip="Not in the system yet? Create it — it's added to this booking when you save"
+              >
+                New asset
+              </Button>
+            ) : null}
             <Button
               to={manageAssetsUrl}
               icon="plus"
@@ -473,6 +508,16 @@ function BookingAssetsHeader({
             Equipment
           </Button>
         </div>
+        {newAssetUrl ? (
+          <Button
+            to={newAssetUrl}
+            variant="secondary"
+            className="mt-2 w-full whitespace-nowrap"
+            disabled={manageAssetsButtonDisabled}
+          >
+            New asset (not in the system yet)
+          </Button>
+        ) : null}
       </When>
     </div>
   );

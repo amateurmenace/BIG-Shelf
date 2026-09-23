@@ -63,6 +63,7 @@ import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
@@ -96,6 +97,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export type AssetWithBooking = Asset & {
@@ -491,6 +493,17 @@ export default function AddAssetsToNewBooking() {
 
   const { booking, bookingKitIds, items, totalItems } =
     useLoaderData<typeof loader>();
+  const { roles } = useUserRoleHelper();
+  /**
+   * BIG: when the item isn't in the catalog yet, staff can create it from here
+   * and it lands in this booking. Members can open this picker for their own
+   * drafts but cannot create assets, so they get no button.
+   */
+  const canCreateAssets = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.create,
+  });
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -679,12 +692,19 @@ export default function AddAssetsToNewBooking() {
             updateItem(asset);
           }}
           emptyStateClassName="py-10"
-          customEmptyStateContent={{
-            title: "You haven't added any assets yet.",
-            text: "What are you waiting for? Create your first asset now!",
-            newButtonRoute: "/assets/new",
-            newButtonContent: "New asset",
-          }}
+          customEmptyStateContent={
+            canCreateAssets
+              ? {
+                  title: "Can't find it?",
+                  text: "If it isn't in the system yet, create it — it's added to this booking when you save.",
+                  newButtonRoute: `/assets/new?booking=${booking.id}`,
+                  newButtonContent: "Create new asset",
+                }
+              : {
+                  title: "No equipment matches",
+                  text: "Try a different search, or clear the filters.",
+                }
+          }
           bulkActions={<> </>}
           disableSelectAllItems
           headerChildren={

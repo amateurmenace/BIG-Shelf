@@ -105,6 +105,12 @@ type Props = Partial<
   tags?: Tag[];
   barcodes?: Pick<Barcode, "id" | "value" | "type">[];
   referer?: string | null;
+  /**
+   * BIG: where the form posts. Defaults to ".", which posts to the current
+   * route WITHOUT its query string — so the new-asset page passes its own
+   * `?booking=` / `?kit=` through here, or its action never sees them.
+   */
+  action?: string;
 };
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -124,6 +130,7 @@ export const AssetForm = ({
   barcodes,
   preferredBarcodeId,
   referer,
+  action = ".",
 }: Props) => {
   const navigation = useNavigation();
   const { canUseBarcodes } = useBarcodePermissions();
@@ -227,7 +234,7 @@ export const AssetForm = ({
       <Form
         ref={zo.ref}
         method="post"
-        action="."
+        action={action}
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
         onSubmit={(e) => {
