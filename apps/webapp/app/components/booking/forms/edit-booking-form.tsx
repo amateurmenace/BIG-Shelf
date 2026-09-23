@@ -38,6 +38,8 @@ import BookingProcessSidebar from "../booking-process-sidebar";
 import CheckinDropdown from "../checkin-dropdown";
 import CheckoutDropdown from "../checkout-dropdown";
 import ExtendBookingDialog from "../extend-booking-dialog";
+import { ReserveReminder } from "./reserve-reminder";
+import { getReserveDisabled } from "./reserve-state";
 
 type BookingFlags = {
   hasAssets: boolean;
@@ -233,6 +235,23 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       (defaultTeamMember?.userId === userId ||
         defaultTeamMember?.id === userId));
 
+  /** BIG: one rule for both Reserve buttons — see reserve-state.ts. */
+  const reserveDisabled = getReserveDisabled({
+    disabled,
+    isProcessing,
+    isLoadingWorkingHours,
+    bookingFlags,
+  });
+  const reserveLabel = isBase ? "Request reservation" : "Reserve";
+  /**
+   * BIG: once a draft has items, keep a Reserve button on screen. The header's
+   * scrolls away with the equipment list, and people left thinking their gear
+   * was held.
+   */
+  const showReserveReminder = Boolean(
+    canSeeActions && bookingStatus?.isDraft && bookingFlags?.hasAssets
+  );
+
   return (
     <Form
       ref={formRef}
@@ -333,30 +352,14 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
             {/* When booking is draft, we show the reserve button */}
             {bookingStatus?.isDraft ? (
               <Button
-                disabled={
-                  disabled ||
-                  isLoadingWorkingHours ||
-                  !bookingFlags?.hasAssets ||
-                  bookingFlags?.hasAlreadyBookedAssets ||
-                  bookingFlags?.hasUnavailableAssets
-                    ? {
-                        reason: bookingFlags?.hasUnavailableAssets
-                          ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
-                          : bookingFlags?.hasAlreadyBookedAssets
-                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
-                          : isProcessing || isLoadingWorkingHours
-                          ? undefined
-                          : "You need to add assets to your booking before you can reserve it",
-                      }
-                    : false
-                }
+                disabled={reserveDisabled}
                 type="submit"
                 name="intent"
                 value="reserve"
                 className="grow whitespace-nowrap"
                 size="sm"
               >
-                {isBase ? "Request reservation" : "Reserve"}
+                {reserveLabel}
               </Button>
             ) : null}
 
@@ -563,6 +566,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
           </div>
         </div>
       </div>
+      {showReserveReminder ? (
+        <>
+          {/* Room to scroll the page's last rows above the pinned card. */}
+          <div aria-hidden className="h-24" />
+          <ReserveReminder label={reserveLabel} disabled={reserveDisabled} />
+        </>
+      ) : null}
     </Form>
   );
 }
