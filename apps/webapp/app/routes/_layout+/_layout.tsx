@@ -19,13 +19,11 @@ import {
 import { useHydrated } from "remix-utils/use-hydrated";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
+import { NewBookingButton } from "~/components/big/new-booking-button";
 import { ErrorContent } from "~/components/errors";
 
 import FeedbackModal from "~/components/feedback/feedback-modal";
-import {
-  CommandPaletteButton,
-  CommandPaletteRoot,
-} from "~/components/layout/command-palette";
+import { CommandPaletteRoot } from "~/components/layout/command-palette";
 import AppSidebar from "~/components/layout/sidebar/app-sidebar";
 import {
   SidebarInset,
@@ -329,7 +327,8 @@ export default function App() {
                   <ShelfMobileLogo />
                 </Link>
                 <div className="flex items-center space-x-2">
-                  <CommandPaletteButton variant="icon" />
+                  {/* BIG: "New booking" where "Quick find" was. */}
+                  <NewBookingButton variant="icon" />
                   <NavLink
                     to="/scanner"
                     title="Scan QR Code"

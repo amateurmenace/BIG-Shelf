@@ -207,6 +207,22 @@ additions on top of upstream's changes.
   `app/routes/_layout+/loan-agreement.$bookingId.tsx`, the print route. Core
   edits: the checkout gate in `app/modules/booking/service.server.ts`, the
   booking page's "not signed" banner (`bookings.$bookingId.tsx`).
+- **Booking-page conveniences** — (1) a **New booking** button in the top right
+  of every page, where upstream's "Quick find" button was (`NewBookingButton`;
+  staff → `/bookings/new`, members → `/reserve`); Quick find still opens with
+  ⌘K / Ctrl K, which belongs to the palette, not the button. (2) A **"Not
+  reserved yet"** card pinned to the bottom of a DRAFT booking with items, whose
+  Reserve submits `edit-booking-form` — the header Reserve scrolls away with
+  the equipment list; both buttons share `getReserveDisabled`. (3) **New asset
+  from a booking**: `/assets/new?booking=<id>` creates the asset and adds it via
+  `updateBookingAssets` (booking checked org-scoped and open BEFORE anything is
+  created). `AssetForm` takes an `action` prop because its default `action="."`
+  drops the query string — which had also silently broken BIG's `?kit=` since
+  it shipped. Additive: `components/big/new-booking-button.tsx`,
+  `components/booking/forms/reserve-{reminder,state}.*`. Core edits:
+  `components/layout/header/index.tsx`, the mobile bar in `_layout.tsx`,
+  `edit-booking-form.tsx`, `assets.new.tsx`, `components/assets/form.tsx`,
+  `booking-assets-column.tsx`, the manage-assets empty state.
 - **Asset condition & maintenance tracking** — a dated, photo-supported condition
   log per asset. Additive: `app/modules/big-asset-condition/`,
   `app/routes/_layout+/assets.$assetId.condition.tsx`. Core edit: the tab
