@@ -195,9 +195,18 @@ additions on top of upstream's changes.
   `booking/notification-recipients.server.ts` (step 7.5), the account-details tab
   array, the user-profile `TABS` array.
 - **Digital loan agreements** — a per-checkout e-signed agreement putting
-  liability on the borrower. Additive: `app/modules/big-loan-agreement/`,
-  `app/routes/_layout+/loan-agreement.$bookingId.tsx`. Core edit: the checkout
-  gate in `app/modules/booking/service.server.ts`.
+  liability on the borrower. It lists everything taken away — equipment (with
+  label codes) AND supplies — on screen, on paper and in the stored snapshot
+  (`getLoanItems`). Staff may instead PRINT it for an in-person signature
+  (`routes/loan-agreement.$bookingId.print.tsx`, outside `_layout+` so no app
+  chrome prints; staff-only) and record the paper copy on the signing page
+  (`LoanAgreementSignature.method = PAPER`); either kind satisfies the checkout
+  gate. Both pages build the text with `buildAgreementForBooking`, so paper is
+  word-for-word what would be e-signed. Additive:
+  `app/modules/big-loan-agreement/`, `app/components/big/loan-agreement/`,
+  `app/routes/_layout+/loan-agreement.$bookingId.tsx`, the print route. Core
+  edits: the checkout gate in `app/modules/booking/service.server.ts`, the
+  booking page's "not signed" banner (`bookings.$bookingId.tsx`).
 - **Asset condition & maintenance tracking** — a dated, photo-supported condition
   log per asset. Additive: `app/modules/big-asset-condition/`,
   `app/routes/_layout+/assets.$assetId.condition.tsx`. Core edit: the tab

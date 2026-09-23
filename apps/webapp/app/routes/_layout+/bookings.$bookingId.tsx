@@ -132,7 +132,7 @@ export default function AssetDetailsPage() {
   const hasName = name !== "";
   const { booking, needsLoanAgreementSignature } =
     useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const { roles, isBaseOrSelfService } = useUserRoleHelper();
 
   const items = [
     { to: "overview", content: "Overview" },
@@ -188,16 +188,34 @@ export default function AssetDetailsPage() {
                 </p>
                 <p className="text-sm text-gray-600">
                   This reservation must have its loan agreement signed before it
-                  can be checked out.
+                  can be checked out
+                  {/* BIG: staff can use paper for in-person reservations. */}
+                  {isBaseOrSelfService
+                    ? "."
+                    : " — digitally, or on a printed copy signed in person."}
                 </p>
               </div>
-              <Button
-                to={`/loan-agreement/${booking.id}`}
-                variant="secondary"
-                className="shrink-0 whitespace-nowrap"
-              >
-                Review &amp; sign
-              </Button>
+              <div className="flex shrink-0 gap-2">
+                {!isBaseOrSelfService ? (
+                  <Button
+                    to={`/loan-agreement/${booking.id}/print?autoprint=1`}
+                    target="_blank"
+                    variant="secondary"
+                    icon="print"
+                    className="whitespace-nowrap"
+                    tooltip="Print the agreement for the borrower to sign in person, then record it on the Review & sign page"
+                  >
+                    Print form
+                  </Button>
+                ) : null}
+                <Button
+                  to={`/loan-agreement/${booking.id}`}
+                  variant="secondary"
+                  className="whitespace-nowrap"
+                >
+                  Review &amp; sign
+                </Button>
+              </div>
             </div>
           ) : null}
         </>

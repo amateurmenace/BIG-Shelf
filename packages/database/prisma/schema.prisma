@@ -2076,10 +2076,20 @@ model LoanAgreementSignature {
   ipAddress        String?
   userAgent        String?
   signedAt         DateTime @default(now())
+  /// BIG: how it was signed. PAPER = the borrower signed a printed copy in
+  /// person and a staff member recorded it; `signedByUserId` is then that
+  /// staff member, `ipAddress`/`userAgent` are theirs.
+  method           LoanAgreementSignatureMethod @default(DIGITAL)
 
   @@index([bookingId])
   @@index([organizationId])
   @@index([signedByUserId])
+}
+
+/// BIG: whether a loan agreement was e-signed or signed on paper in person.
+enum LoanAgreementSignatureMethod {
+  DIGITAL
+  PAPER
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
