@@ -29,6 +29,7 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
+import { ensureMemberRecordBestEffort } from "~/modules/big-member-directory/service.server";
 import {
   assertActiveNeonMemberForSignup,
   linkNeonAccountByEmail,
@@ -124,6 +125,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
         });
         // Best-effort: stamp their Neon account id for future reconciliation.
         await linkNeonAccountByEmail(authSession.email);
+        // BIG: give them their team-member record, taking over any account-less
+        // one staff booked for them before they signed up. After the stamp
+        // above, so a secondary Neon email still finds it.
+        await ensureMemberRecordBestEffort({
+          organizationId: NEON_MEMBER_ORG_ID,
+          userId: authSession.userId,
+        });
 
         context.setSession(authSession);
         // Land them in the member workspace and on the reserve hub.

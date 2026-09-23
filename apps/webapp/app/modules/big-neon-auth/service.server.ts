@@ -28,6 +28,7 @@ import {
 } from "~/integrations/neon-crm/client.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { mapAuthSession } from "~/modules/auth/mappers.server";
+import { ensureMemberRecordBestEffort } from "~/modules/big-member-directory/service.server";
 import {
   findNeonAllowlistMemberByEmail,
   isAllowlistTrustworthy,
@@ -202,10 +203,16 @@ export async function provisionAndMintNeonSession(
   });
 
   // Stamp the Neon account id so future logins reconcile by identity, not email.
-  await db.user.update({
+  const user = await db.user.update({
     where: { email },
     data: { neonAccountId: neonMember.neonAccountId },
+    select: { id: true },
   });
+
+  // BIG: give them their team-member record — taking over any account-less one
+  // staff booked for them before they signed up, so those reservations are
+  // theirs. Without it the portal refused to let them reserve at all.
+  await ensureMemberRecordBestEffort({ organizationId, userId: user.id });
 
   const authSession = await mintSupabaseSession(email);
   return { authSession, organizationId };

@@ -30,6 +30,7 @@ import type { Organization, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { AdditionalData } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { ReservablePerson } from "./shared";
 import {
@@ -333,4 +334,179 @@ async function findExistingRecord({
   }
 
   return null;
+}
+
+/** What {@link ensureMemberRecord} did, for callers that log or test it. */
+export type MemberRecordOutcome =
+  /** They already had a record; nothing changed. */
+  | "existing"
+  /** They took over the account-less record staff had been booking on. */
+  | "adopted"
+  /** Nobody had booked for them; a fresh record was made. */
+  | "created";
+
+/**
+ * Makes sure a person with an account has their team-member record in this
+ * organization — taking over the account-less one staff created for them, so
+ * reservations made on their behalf before they signed up are theirs now.
+ *
+ * Why this exists: every BIG member self-signup path (Neon sign-in,
+ * Google/Microsoft, email) attached the account to BIG but never created its
+ * `TeamMember`; only invites did. A member who signed up on their own was then
+ * stopped by the portal ("Your account isn't linked to a team member yet…")
+ * with no way for staff to fix it. And someone reserved for from the Neon
+ * directory before signing up had their bookings on an account-less record
+ * their new account never saw.
+ *
+ * In order:
+ * 1. They already have a live record here → returned unchanged.
+ * 2. Staff reserved for them before they had an account → that record becomes
+ *    theirs: it is linked to the account, and its bookings gain the account as
+ *    custodian, so they appear under the member's reservations. Matched by the
+ *    account's email, or by any Neon email on the same Neon account (members
+ *    may sign up with a secondary address).
+ * 3. Otherwise → a new record linked to the account.
+ *
+ * Runs under a per-person advisory lock: two simultaneous first logins (a
+ * known signup race here) would otherwise each create a record.
+ *
+ * @param args.organizationId - The organization they belong to.
+ * @param args.userId - Their account.
+ * @returns Their record, and which of the three paths was taken.
+ * @throws {ShelfError} When the account does not exist or the write fails.
+ */
+export async function ensureMemberRecord({
+  organizationId,
+  userId,
+}: {
+  organizationId: Organization["id"];
+  userId: User["id"];
+}): Promise<
+  ResolvedCustodian & { outcome: MemberRecordOutcome; movedBookings: number }
+> {
+  const recordSelect = { id: true, userId: true, name: true } as const;
+
+  try {
+    return await db.$transaction(async (tx) => {
+      // Serialise concurrent first logins for the same person. Released
+      // automatically when the transaction ends.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`member-record:${organizationId}:${userId}`}))`;
+
+      const existing = await tx.teamMember.findFirst({
+        where: { organizationId, userId, deletedAt: null },
+        select: recordSelect,
+      });
+      if (existing) {
+        return { ...existing, outcome: "existing" as const, movedBookings: 0 };
+      }
+
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: {
+          email: true,
+          firstName: true,
+          lastName: true,
+          displayName: true,
+          neonAccountId: true,
+        },
+      });
+      const name = resolveUserDisplayName(user) || user.email;
+
+      // Every email this person is known by in Neon: the one they signed up
+      // with, plus any other address on the same Neon account.
+      const emails = new Set([user.email.toLowerCase()]);
+      if (user.neonAccountId) {
+        const sameAccount = await tx.neonAllowlistMember.findMany({
+          where: { neonAccountId: user.neonAccountId },
+          select: { email: true },
+        });
+        for (const row of sameAccount) emails.add(row.email.toLowerCase());
+      }
+
+      const links = await tx.memberDirectoryLink.findMany({
+        where: { organizationId, email: { in: [...emails] } },
+        select: {
+          email: true,
+          teamMember: {
+            select: { id: true, userId: true, deletedAt: true },
+          },
+        },
+      });
+      // Prefer the record made under the email they signed up with. Never
+      // take a record that already belongs to another account.
+      const adoptable = links
+        .filter((link) => !link.teamMember.deletedAt && !link.teamMember.userId)
+        .sort(
+          (a, b) =>
+            Number(b.email === user.email.toLowerCase()) -
+            Number(a.email === user.email.toLowerCase())
+        )[0];
+
+      if (adoptable) {
+        const record = await tx.teamMember.update({
+          // Scoped to the organization as well as the id, so a record could
+          // never be claimed across workspaces even if a link were wrong.
+          where: { id: adoptable.teamMember.id, organizationId },
+          data: { userId, name },
+          select: recordSelect,
+        });
+        // The record already IS the custodian of these bookings; this makes
+        // the account the custodian too, so they show under the member's own
+        // reservations (which are looked up by account).
+        const { count } = await tx.booking.updateMany({
+          where: {
+            organizationId,
+            custodianTeamMemberId: record.id,
+            custodianUserId: null,
+          },
+          data: { custodianUserId: userId },
+        });
+        return { ...record, outcome: "adopted" as const, movedBookings: count };
+      }
+
+      const created = await tx.teamMember.create({
+        data: { name, organizationId, userId },
+        select: recordSelect,
+      });
+      return { ...created, outcome: "created" as const, movedBookings: 0 };
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Could not set up this member's record.",
+      additionalData: { organizationId, userId },
+      label,
+    });
+  }
+}
+
+/**
+ * {@link ensureMemberRecord} for sign-in paths: never throws.
+ *
+ * Signing in must not fail because this step did — a member locked out of
+ * their account over a missing team-member row is worse than the row being
+ * created a moment later. On failure it logs loudly; the member portal calls
+ * {@link ensureMemberRecord} itself before anything needs the record, so the
+ * work is simply redone there.
+ *
+ * @param args.organizationId - The organization they just joined or entered.
+ * @param args.userId - Their account.
+ */
+export async function ensureMemberRecordBestEffort(args: {
+  organizationId: Organization["id"];
+  userId: User["id"];
+}): Promise<void> {
+  try {
+    await ensureMemberRecord(args);
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Could not set up a member's record at sign-in; the member portal will retry on first use.",
+        additionalData: args,
+        label,
+      })
+    );
+  }
 }

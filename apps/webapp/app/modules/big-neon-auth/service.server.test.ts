@@ -1,8 +1,18 @@
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: stub the DB so the gate's membership lookup returns fixtures, not real rows.
 vi.mock("~/database/db.server", () => ({
-  db: { userOrganization: { findFirst: vi.fn() } },
+  db: { userOrganization: { findFirst: vi.fn() }, user: { update: vi.fn() } },
+}));
+// why: which workspace Neon members join is configuration, unset in tests.
+vi.mock("~/utils/env", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  NEON_MEMBER_ORG_ID: "org-big",
+}));
+// why: record creation has its own tests; here we check sign-in asks for it.
+vi.mock("~/modules/big-member-directory/service.server", () => ({
+  ensureMemberRecordBestEffort: vi.fn(),
 }));
 // why: stub the Neon client so no real API call is made; toggle configured per test.
 vi.mock("~/integrations/neon-crm/client.server", () => ({
@@ -32,19 +42,25 @@ vi.mock("~/utils/logger", () => ({ Logger: { error: vi.fn() } }));
 
 import { db } from "~/database/db.server";
 import { isNeonApiConfigured } from "~/integrations/neon-crm/client.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { ensureMemberRecordBestEffort } from "~/modules/big-member-directory/service.server";
 import {
   findNeonAllowlistMemberByEmail,
   isAllowlistTrustworthy,
   isEmailOnNeonAllowlist,
   refreshAllowlistMemberFromNeon,
 } from "~/modules/big-neon-sync/service.server";
-import { findUserByEmail } from "~/modules/user/service.server";
+import {
+  createUserOrAttachOrg,
+  findUserByEmail,
+} from "~/modules/user/service.server";
 
 import {
   assertActiveNeonMemberForOtp,
   assertMemberCanReserve,
   findActiveMemberWithoutAccount,
   isMemberReservationEligible,
+  provisionAndMintNeonSession,
 } from "./service.server";
 
 const ARGS = { userId: "u1", organizationId: "org1" };
@@ -327,5 +343,77 @@ describe("findActiveMemberWithoutAccount (kiosk walk-up, no account)", () => {
       status: 503,
       message: expect.stringContaining("ask a member of staff"),
     });
+  });
+});
+
+describe("provisionAndMintNeonSession (Log in with Neon)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mf(createUserOrAttachOrg).mockResolvedValue({ id: "u-ava" });
+    mf(db.user.update).mockResolvedValue({ id: "u-ava" });
+    // A Supabase that hands back a session for the magic link.
+    mf(getSupabaseAdmin).mockReturnValue({
+      auth: {
+        admin: {
+          generateLink: vi.fn().mockResolvedValue({
+            data: { properties: { hashed_token: "hash" } },
+            error: null,
+          }),
+        },
+        verifyOtp: vi.fn().mockResolvedValue({
+          data: {
+            session: {
+              access_token: "access",
+              refresh_token: "refresh",
+              expires_in: 3600,
+              expires_at: 1,
+              user: { id: "u-ava", email: "ava@example.com" },
+            },
+          },
+          error: null,
+        }),
+      },
+    });
+  });
+
+  it("joins them to BIG and gives them their record — after stamping their Neon id", async () => {
+    const { organizationId } = await provisionAndMintNeonSession({
+      neonAccountId: "9001",
+      email: "Ava@Example.com",
+      firstName: "Ava",
+      lastName: "Whitfield",
+      isActiveMember: true,
+    });
+
+    expect(organizationId).toBe("org-big");
+    expect(createUserOrAttachOrg).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "ava@example.com",
+        organizationId: "org-big",
+        roles: [OrganizationRoles.MEMBER],
+      })
+    );
+    expect(ensureMemberRecordBestEffort).toHaveBeenCalledWith({
+      organizationId: "org-big",
+      userId: "u-ava",
+    });
+    // The Neon id must be on the account first, so a record staff made under
+    // another of their Neon emails is still found.
+    expect(mf(db.user.update).mock.invocationCallOrder[0]).toBeLessThan(
+      mf(ensureMemberRecordBestEffort).mock.invocationCallOrder[0]
+    );
+  });
+
+  it("gives an inactive member nothing at all", async () => {
+    await expect(
+      provisionAndMintNeonSession({
+        neonAccountId: "9001",
+        email: "ava@example.com",
+        firstName: "Ava",
+        lastName: "Whitfield",
+        isActiveMember: false,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+    expect(ensureMemberRecordBestEffort).not.toHaveBeenCalled();
   });
 });

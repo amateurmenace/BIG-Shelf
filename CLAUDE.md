@@ -159,12 +159,20 @@ additions on top of upstream's changes.
   members — they may only book for themselves. The kiosk walk-up uses the same
   path for paid-up members with no account (`findActiveMemberWithoutAccount`:
   the synced directory, then live Neon); an unreachable Neon tells them to ask
-  staff — never to "become a member" — and creates nothing. Additive:
+  staff — never to "become a member" — and creates nothing. When someone
+  signs up (Neon, Google/Microsoft or email), `ensureMemberRecord` gives them
+  their `TeamMember`, TAKING OVER the account-less one staff booked on (matched
+  by email or Neon account id) so those bookings follow them. Every
+  self-signup path used to skip the record entirely — only invites made one —
+  and email signups never even joined BIG; the member portal now calls it too,
+  replacing a "contact staff" dead end staff had no way to fix. Additive:
   `app/modules/big-member-directory/`, the endpoint, the picker, the
   `MemberDirectoryLink` table. Core edits: the schema back-relations on
   `TeamMember`/`Organization`, custodian resolution in `bookings.new`, the
   booking overview actions, `parseRoomBookingForm` and the kiosk walk-up
-  action, `model-filters.ts`
+  action, the sign-up paths (`otp.tsx`, `oauth.social-callback.tsx`, Neon
+  `provisionAndMintNeonSession`), the `reserve.order` / `reserve.rooms.$roomId`
+  loaders, `model-filters.ts`
   (upstream bug: surname was never searched), and `team-member/service.server.ts`
   (upstream bug: the picker query had `take: 12` with no `orderBy`).
 - **Per-user booking-email preferences** — upstream's notification settings are

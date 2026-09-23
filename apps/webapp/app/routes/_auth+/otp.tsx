@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { OrganizationRoles } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -13,6 +14,7 @@ import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import { ensureMemberRecordBestEffort } from "~/modules/big-member-directory/service.server";
 import {
   assertActiveNeonMemberForSignup,
   linkNeonAccountByEmail,
@@ -25,6 +27,7 @@ import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { NEON_MEMBER_ORG_ID } from "~/utils/env";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -93,19 +96,35 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const authSession = await verifyOtpAndSignin(email, otp);
         const userExists = Boolean(await findUserByEmail(email));
+        // BIG: set when this signup joined the member workspace, so they land
+        // there rather than in whatever workspace would be picked by default.
+        let joinedMemberWorkspace: string | null = null;
 
         if (!userExists) {
           // BIG: THE choke point. Whatever route mailed the code, this is where
           // an account comes into existence — so this is where the membership
           // gate has to hold. Gating only the send paths left the account
           // creation itself unguarded.
-          await assertActiveNeonMemberForSignup(email);
+          const neonMember = await assertActiveNeonMemberForSignup(email);
+
+          // BIG: a confirmed Neon member joins the member workspace as MEMBER —
+          // exactly what the Neon and Google/Microsoft sign-ups already do.
+          // Email sign-up used to create only a personal workspace, so these
+          // members never joined BIG: they could not reserve, and never saw
+          // reservations staff had made for them. (`null` means Neon is not
+          // configured, e.g. local dev — keep the original behaviour.)
+          const memberWorkspaceId =
+            neonMember && NEON_MEMBER_ORG_ID ? NEON_MEMBER_ORG_ID : null;
 
           try {
             const username = await generateUniqueUsername(authSession.email);
             await createUser({
               ...authSession,
               username,
+              ...(memberWorkspaceId && {
+                organizationId: memberWorkspaceId,
+                roles: [OrganizationRoles.MEMBER],
+              }),
             });
           } catch (createError) {
             // Handle race condition: if a concurrent request already
@@ -120,15 +139,30 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
           // BIG: stamp the new member's Neon Account ID (best-effort, never throws).
           await linkNeonAccountByEmail(email);
+
+          if (memberWorkspaceId) {
+            // BIG: give them their team-member record, taking over any
+            // account-less one staff booked for them before they signed up.
+            // After the stamp above, so a secondary Neon email still finds it.
+            await ensureMemberRecordBestEffort({
+              organizationId: memberWorkspaceId,
+              userId: authSession.userId,
+            });
+            joinedMemberWorkspace = memberWorkspaceId;
+          }
         }
 
         // Setting the auth session and redirecting user to assets page
         context.setSession(authSession);
 
-        const { organizationId } = await getSelectedOrganization({
-          userId: authSession.userId,
-          request,
-        });
+        const organizationId =
+          joinedMemberWorkspace ??
+          (
+            await getSelectedOrganization({
+              userId: authSession.userId,
+              request,
+            })
+          ).organizationId;
 
         // BIG: default landing is the home dashboard
         return redirect(safeRedirect("/home"), {

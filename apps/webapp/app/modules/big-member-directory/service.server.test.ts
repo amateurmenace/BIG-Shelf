@@ -1,7 +1,10 @@
 import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
+import { Logger } from "~/utils/logger";
 import {
+  ensureMemberRecord,
+  ensureMemberRecordBestEffort,
   listReservablePeople,
   resolveReservationCustodian,
 } from "./service.server";
@@ -16,6 +19,10 @@ vi.mock("~/database/db.server", () => ({
     $transaction: vi.fn(),
   },
 }));
+
+// why: the sign-in wrapper's whole contract is "log instead of throwing";
+// capture the log rather than printing it.
+vi.mock("~/utils/logger", () => ({ Logger: { error: vi.fn() } }));
 
 const ORG = "org-big";
 const dbMock = vi.mocked(db, true);
@@ -389,5 +396,234 @@ describe("resolveReservationCustodian", () => {
     });
 
     expect(result.id).toBe("tm-winner");
+  });
+});
+
+describe("ensureMemberRecord — the record a member's account needs", () => {
+  /** Everything the function touches runs inside this transaction client. */
+  const ensureTx = {
+    $executeRaw: vi.fn(),
+    teamMember: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
+    user: { findUniqueOrThrow: vi.fn() },
+    neonAllowlistMember: { findMany: vi.fn() },
+    memberDirectoryLink: { findMany: vi.fn() },
+    booking: { updateMany: vi.fn() },
+  };
+
+  const ACCOUNT = {
+    email: "ava@example.com",
+    firstName: "Ava",
+    lastName: "Whitfield",
+    displayName: null,
+    neonAccountId: null as string | null,
+  };
+
+  /** A directory link row as the function selects it. */
+  function link(
+    email: string,
+    teamMember: { id: string; userId?: string | null; deletedAt?: Date | null }
+  ) {
+    return {
+      email,
+      teamMember: { userId: null, deletedAt: null, ...teamMember },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.$transaction.mockImplementation(((callback: any) =>
+      callback(ensureTx)) as any);
+    ensureTx.teamMember.findFirst.mockResolvedValue(null);
+    ensureTx.user.findUniqueOrThrow.mockResolvedValue({ ...ACCOUNT });
+    ensureTx.neonAllowlistMember.findMany.mockResolvedValue([]);
+    ensureTx.memberDirectoryLink.findMany.mockResolvedValue([]);
+    ensureTx.booking.updateMany.mockResolvedValue({ count: 0 });
+    ensureTx.teamMember.create.mockImplementation(({ data }: any) => ({
+      id: "tm-new",
+      userId: data.userId,
+      name: data.name,
+    }));
+    ensureTx.teamMember.update.mockImplementation(({ where, data }: any) => ({
+      id: where.id,
+      userId: data.userId,
+      name: data.name,
+    }));
+  });
+
+  it("leaves someone who already has a record alone", async () => {
+    ensureTx.teamMember.findFirst.mockResolvedValue({
+      id: "tm-ava",
+      userId: "u-ava",
+      name: "Ava Whitfield",
+    });
+
+    const result = await ensureMemberRecord({
+      organizationId: ORG,
+      userId: "u-ava",
+    });
+
+    expect(result).toMatchObject({ id: "tm-ava", outcome: "existing" });
+    expect(ensureTx.teamMember.create).not.toHaveBeenCalled();
+    expect(ensureTx.teamMember.update).not.toHaveBeenCalled();
+    expect(ensureTx.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("takes a per-person lock before looking, so two first logins can't both create one", async () => {
+    await ensureMemberRecord({ organizationId: ORG, userId: "u-ava" });
+
+    const [, key] = ensureTx.$executeRaw.mock.calls[0];
+    expect(key).toBe("member-record:org-big:u-ava");
+    expect(ensureTx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      ensureTx.teamMember.findFirst.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("takes over the record staff booked on, so those reservations become theirs", async () => {
+    ensureTx.memberDirectoryLink.findMany.mockResolvedValue([
+      link("ava@example.com", { id: "tm-booked" }),
+    ]);
+    ensureTx.booking.updateMany.mockResolvedValue({ count: 3 });
+
+    const result = await ensureMemberRecord({
+      organizationId: ORG,
+      userId: "u-ava",
+    });
+
+    expect(result).toEqual({
+      id: "tm-booked",
+      userId: "u-ava",
+      name: "Ava Whitfield",
+      outcome: "adopted",
+      movedBookings: 3,
+    });
+    expect(ensureTx.teamMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "tm-booked", organizationId: ORG },
+        data: { userId: "u-ava", name: "Ava Whitfield" },
+      })
+    );
+    expect(ensureTx.booking.updateMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: ORG,
+        custodianTeamMemberId: "tm-booked",
+        custodianUserId: null,
+      },
+      data: { custodianUserId: "u-ava" },
+    });
+    expect(ensureTx.teamMember.create).not.toHaveBeenCalled();
+  });
+
+  it("finds it when they sign up with another email on the same Neon account", async () => {
+    ensureTx.user.findUniqueOrThrow.mockResolvedValue({
+      ...ACCOUNT,
+      email: "Ava.Work@Example.com",
+      neonAccountId: "9001",
+    });
+    ensureTx.neonAllowlistMember.findMany.mockResolvedValue([
+      { email: "ava@example.com" },
+      { email: "ava.work@example.com" },
+    ]);
+    ensureTx.memberDirectoryLink.findMany.mockResolvedValue([
+      link("ava@example.com", { id: "tm-booked" }),
+    ]);
+
+    const result = await ensureMemberRecord({
+      organizationId: ORG,
+      userId: "u-ava",
+    });
+
+    expect(ensureTx.neonAllowlistMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { neonAccountId: "9001" } })
+    );
+    const { where } = ensureTx.memberDirectoryLink.findMany.mock.calls[0][0];
+    expect(where.email.in).toEqual(
+      expect.arrayContaining(["ava.work@example.com", "ava@example.com"])
+    );
+    expect(result).toMatchObject({ id: "tm-booked", outcome: "adopted" });
+  });
+
+  it("prefers the record made under the email they signed up with", async () => {
+    ensureTx.user.findUniqueOrThrow.mockResolvedValue({
+      ...ACCOUNT,
+      neonAccountId: "9001",
+    });
+    ensureTx.memberDirectoryLink.findMany.mockResolvedValue([
+      link("ava.other@example.com", { id: "tm-other" }),
+      link("ava@example.com", { id: "tm-login" }),
+    ]);
+
+    const result = await ensureMemberRecord({
+      organizationId: ORG,
+      userId: "u-ava",
+    });
+
+    expect(result.id).toBe("tm-login");
+  });
+
+  it("never takes a record that already belongs to another account", async () => {
+    ensureTx.memberDirectoryLink.findMany.mockResolvedValue([
+      link("ava@example.com", { id: "tm-taken", userId: "u-someone-else" }),
+    ]);
+
+    const result = await ensureMemberRecord({
+      organizationId: ORG,
+      userId: "u-ava",
+    });
+
+    expect(ensureTx.teamMember.update).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ id: "tm-new", outcome: "created" });
+  });
+
+  it("ignores a record staff have removed from the team", async () => {
+    ensureTx.memberDirectoryLink.findMany.mockResolvedValue([
+      link("ava@example.com", { id: "tm-removed", deletedAt: new Date() }),
+    ]);
+
+    const result = await ensureMemberRecord({
+      organizationId: ORG,
+      userId: "u-ava",
+    });
+
+    expect(ensureTx.teamMember.update).not.toHaveBeenCalled();
+    expect(result.outcome).toBe("created");
+  });
+
+  it("creates a fresh record, named after the account, when nobody booked for them", async () => {
+    const result = await ensureMemberRecord({
+      organizationId: ORG,
+      userId: "u-ava",
+    });
+
+    expect(ensureTx.teamMember.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { name: "Ava Whitfield", organizationId: ORG, userId: "u-ava" },
+      })
+    );
+    expect(result).toMatchObject({ outcome: "created", movedBookings: 0 });
+  });
+
+  it("falls back to the email for the name when the account has none", async () => {
+    ensureTx.user.findUniqueOrThrow.mockResolvedValue({
+      ...ACCOUNT,
+      firstName: null,
+      lastName: null,
+    });
+
+    await ensureMemberRecord({ organizationId: ORG, userId: "u-ava" });
+
+    expect(ensureTx.teamMember.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ name: "ava@example.com" }),
+      })
+    );
+  });
+
+  it("never blocks a sign-in: the best-effort version logs instead of throwing", async () => {
+    dbMock.$transaction.mockRejectedValueOnce(new Error("database blip"));
+
+    await expect(
+      ensureMemberRecordBestEffort({ organizationId: ORG, userId: "u-ava" })
+    ).resolves.toBeUndefined();
+    expect(Logger.error).toHaveBeenCalled();
   });
 });

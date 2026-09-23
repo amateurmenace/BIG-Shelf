@@ -51,6 +51,7 @@ import { db } from "~/database/db.server";
 import { useDisabled } from "~/hooks/use-disabled";
 import { createEquipmentReservation } from "~/modules/big-equipment/service.server";
 import { requireMemberPortalAccess } from "~/modules/big-member/service.server";
+import { ensureMemberRecord } from "~/modules/big-member-directory/service.server";
 import { parseRoomBookingForm } from "~/modules/big-room-booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getTeamMemberForForm } from "~/modules/team-member/service.server";
@@ -99,19 +100,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getBookingSettingsForOrganization(organizationId),
     ]);
 
-    const selfTeamMember = teamMembersData.teamMembers[0];
-    if (!selfTeamMember) {
-      throw new ShelfError({
-        cause: null,
-        title: "Account not ready",
-        message:
-          "Your account isn't linked to a team member yet, so it can't hold reservations. Please contact staff.",
-        additionalData: { userId, organizationId },
-        status: 400,
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
+    // BIG: someone in the workspace without a team-member record gets one
+    // now — taking over any account-less record staff booked for them —
+    // instead of a dead end telling them to contact staff, who had no way to
+    // fix it. Sign-up normally does this already; this is the backstop.
+    const selfTeamMember =
+      teamMembersData.teamMembers[0] ??
+      (await ensureMemberRecord({ organizationId, userId }));
 
     /**
      * BIG: `?addTo=<bookingId>` is the "I also need equipment" path from a room
